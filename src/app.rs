@@ -134,16 +134,65 @@ fn format_planka_due(s: &str) -> Option<String> {
 
 impl App {
     fn selected_index_in_all(&self) -> Option<usize> {
-        let mut seen = 0usize;
+        // Apply same project and search filtering as the TUI
+        let q = if self.search_query.is_empty() {
+            None
+        } else {
+            Some(self.search_query.to_lowercase())
+        };
+
+        // Detect Doing/Done list ids for current project
+        let doing_id = self
+            .planka_lists_by_board
+            .get(&self.current_project)
+            .map(|l| l.doing_list_id.as_str());
+        let done_id = self
+            .planka_lists_by_board
+            .get(&self.current_project)
+            .map(|l| l.done_list_id.as_str());
+
+        // Build grouped indices: Doing first, then Todo, then Done
+        let mut doing: Vec<usize> = Vec::new();
+        let mut todo: Vec<usize> = Vec::new();
+        let mut done: Vec<usize> = Vec::new();
+
         for (i, t) in self.todos.iter().enumerate() {
-            if t.project == self.current_project {
-                if seen == self.selected {
-                    return Some(i);
+            if t.project != self.current_project {
+                continue;
+            }
+            if let Some(ref ql) = q {
+                let matches = t.description.to_lowercase().contains(ql)
+                    || t
+                        .due_date
+                        .as_ref()
+                        .map(|d| d.to_lowercase().contains(ql))
+                        .unwrap_or(false);
+                if !matches {
+                    continue;
                 }
-                seen += 1;
+            }
+            let in_doing = doing_id
+                .map(|id| t.planka_list_id.as_deref() == Some(id))
+                .unwrap_or(false);
+            let in_done = done_id
+                .map(|id| t.planka_list_id.as_deref() == Some(id))
+                .unwrap_or(false);
+
+            if !t.done && in_doing {
+                doing.push(i);
+            } else if t.done || in_done {
+                done.push(i);
+            } else {
+                todo.push(i);
             }
         }
-        None
+
+        let mut ordered: Vec<usize> = Vec::with_capacity(doing.len() + todo.len() + done.len());
+        ordered.extend(doing);
+        ordered.extend(todo);
+        ordered.extend(done);
+
+        ordered.get(self.selected).copied()
     }
     pub fn new() -> Self {
         Self {
