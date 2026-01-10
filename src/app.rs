@@ -233,19 +233,39 @@ impl App {
     }
 
     pub fn mark_done(&mut self) {
-        if let Some(todo) = self.todos.get_mut(self.selected) {
-            let new_done = !todo.done;
-            if new_done {
-                if let (Ok(client), Some(ref lists), Some(ref card_id)) =
-                    (self.ensure_planka_client(), self.planka_lists.as_ref(), todo.planka_card_id.as_ref())
+        if self.selected >= self.todos.len() {
+            return;
+        }
+        // Read needed values without holding a mutable borrow of self
+        let (was_done, card_id_opt) = {
+            let todo = &self.todos[self.selected];
+            (todo.done, todo.planka_card_id.clone())
+        };
+        let new_done = !was_done;
+
+        // If marking done, attempt to move the card on Planka first
+        if new_done {
+            if let Ok(client) = self.ensure_planka_client() {
+                if self.planka_lists.is_none() {
+                    if let Ok(lists) = client.resolve_lists(&self.current_project) {
+                        self.planka_lists = Some(lists);
+                    }
+                }
+                if let (Some(ref lists), Some(ref card_id)) =
+                    (self.planka_lists.as_ref(), card_id_opt.as_ref())
                 {
                     if let Err(e) = client.move_card(card_id, &lists.done_list_id) {
                         self.error_message = Some(format!("Planka move to Done failed: {}", e));
                     } else {
-                        todo.planka_list_id = Some(lists.done_list_id.clone());
+                        if let Some(todo) = self.todos.get_mut(self.selected) {
+                            todo.planka_list_id = Some(lists.done_list_id.clone());
+                        }
                     }
                 }
             }
+        }
+
+        if let Some(todo) = self.todos.get_mut(self.selected) {
             todo.done = new_done;
         }
     }

@@ -1,7 +1,8 @@
 use directories::ProjectDirs;
 use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
+#[cfg(debug_assertions)]
 use serde_json::json;
 use std::fs::{create_dir_all, File};
 use std::io::{BufReader, BufWriter};
