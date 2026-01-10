@@ -1,6 +1,6 @@
 [package]
-name = "Planky"
-version = "2.1.8"
+name = "planky"
+version = "3.0.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A TUI based todo app written in Rust with search and cross platoform notification support"
