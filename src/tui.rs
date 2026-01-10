@@ -54,7 +54,7 @@ where
                             }
                         }
                         KeyCode::Char('d') => app.mark_done(),
-                        KeyCode::Char('W') => {
+                        KeyCode::Char('w') => {
                             app.mark_doing();
                         }
                         KeyCode::Char('?') => {

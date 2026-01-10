@@ -480,19 +480,33 @@ impl App {
                 match client.resolve_lists(&self.current_project) {
                     Ok(lists) => {
                         self.planka_lists = Some(lists.clone());
+                        self.planka_lists_by_board
+                            .insert(self.current_project.clone(), lists.clone());
                         // 3) Fetch cards from todo/doing/done lists
-                        let mut all_cards: Vec<(PlankaCard, bool)> = Vec::new(); // (card, is_done)
+                        let mut all_cards: Vec<(PlankaCard, String)> = Vec::new(); // (card, list_id)
                         // todo list
                         if let Ok(cards) = client.fetch_cards(&lists.todo_list_id) {
-                            all_cards.extend(cards.into_iter().map(|c| (c, false)));
+                            all_cards.extend(
+                                cards
+                                    .into_iter()
+                                    .map(|c| (c, lists.todo_list_id.clone())),
+                            );
                         }
                         // doing list (treat as not done)
                         if let Ok(cards) = client.fetch_cards(&lists.doing_list_id) {
-                            all_cards.extend(cards.into_iter().map(|c| (c, false)));
+                            all_cards.extend(
+                                cards
+                                    .into_iter()
+                                    .map(|c| (c, lists.doing_list_id.clone())),
+                            );
                         }
                         // done list
                         if let Ok(cards) = client.fetch_cards(&lists.done_list_id) {
-                            all_cards.extend(cards.into_iter().map(|c| (c, true)));
+                            all_cards.extend(
+                                cards
+                                    .into_iter()
+                                    .map(|c| (c, lists.done_list_id.clone())),
+                            );
                         }
 
                         // 4) Merge into local todos for the current project (by planka_card_id)
@@ -505,28 +519,25 @@ impl App {
                             }
                         }
 
-                        for (card, is_done) in all_cards {
+                        for (card, list_id) in all_cards {
                             if let Some(&idx) = index_by_card.get(&card.id) {
                                 // Update existing
                                 if let Some(t) = self.todos.get_mut(idx) {
+                                    let is_done = list_id == lists.done_list_id;
                                     t.description = card.name.clone();
                                     t.done = is_done;
                                     t.due_date = card
                                         .due
                                         .as_deref()
                                         .and_then(|s| format_planka_due(s));
-                                    t.planka_list_id = if is_done {
-                                        Some(lists.done_list_id.clone())
-                                    } else {
-                                        Some(lists.todo_list_id.clone())
-                                    };
+                                    t.planka_list_id = Some(list_id.clone());
                                     t.planka_board_id = Some(lists.board_id.clone());
                                 }
                             } else {
                                 // Insert new
                                 self.todos.push(Todo {
                                     description: card.name.clone(),
-                                    done: is_done,
+                                    done: list_id == lists.done_list_id,
                                     due_date: card.due.as_deref().and_then(|s| format_planka_due(s)),
                                     created_date: card
                                         .created
@@ -535,11 +546,7 @@ impl App {
                                         .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string()),
                                     project: self.current_project.clone(),
                                     planka_card_id: Some(card.id.clone()),
-                                    planka_list_id: if is_done {
-                                        Some(lists.done_list_id.clone())
-                                    } else {
-                                        Some(lists.todo_list_id.clone())
-                                    },
+                                    planka_list_id: Some(list_id.clone()),
                                     planka_board_id: Some(lists.board_id.clone()),
                                     sync_dirty: false,
                                 });
@@ -658,10 +665,17 @@ impl App {
             for t in self.todos.iter_mut().filter(|t| t.project == proj) {
                 // New local: create remote
                 if t.planka_card_id.is_none() {
-                    match client.create_card(&lists.todo_list_id, &t.description, t.due_date.as_deref()) {
+                    let initial_list = if t.done {
+                        &lists.done_list_id
+                    } else if t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str()) {
+                        &lists.doing_list_id
+                    } else {
+                        &lists.todo_list_id
+                    };
+                    match client.create_card(initial_list, &t.description, t.due_date.as_deref()) {
                         Ok(cid) => {
                             t.planka_card_id = Some(cid);
-                            t.planka_list_id = Some(lists.todo_list_id.clone());
+                            t.planka_list_id = Some(initial_list.clone());
                             t.planka_board_id = Some(lists.board_id.clone());
                         }
                         Err(e) => {
@@ -672,7 +686,13 @@ impl App {
                 }
                 // Existing linked: ensure list matches done-state and fields updated
                 if let Some(ref cid) = t.planka_card_id.clone() {
-                    let desired_list = if t.done { &lists.done_list_id } else { &lists.todo_list_id };
+                    let desired_list = if t.done {
+                        &lists.done_list_id
+                    } else if t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str()) {
+                        &lists.doing_list_id
+                    } else {
+                        &lists.todo_list_id
+                    };
                     let remote = remote_by_id.get(cid);
                     // Move if list differs
                     if remote.map(|(_, _, l)| l.as_str()) != Some(desired_list.as_str()) {
