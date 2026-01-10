@@ -2,11 +2,13 @@
 use crate::todo::Todo;
 use crate::tui::parse_due_date;
 use chrono::Local;
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists};
+use std::collections::HashMap;
+use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlankaSetupStep {
@@ -88,6 +90,18 @@ impl Default for App {
     }
 }
 
+fn format_planka_due(s: &str) -> Option<String> {
+    // Try RFC3339 first, else return None to leave empty
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        Some(dt.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string())
+    } else if s.len() >= 10 && s.chars().nth(4) == Some('-') {
+        // Looks like a date string; keep date only
+        Some(s[..10].to_string())
+    } else {
+        None
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         Self {
@@ -140,6 +154,66 @@ impl App {
                 match client.resolve_lists(&self.current_project) {
                     Ok(lists) => {
                         self.planka_lists = Some(lists.clone());
+                        // 3) Fetch cards from todo/doing/done lists
+                        let mut all_cards: Vec<(PlankaCard, bool)> = Vec::new(); // (card, is_done)
+                        // todo list
+                        if let Ok(cards) = client.fetch_cards(&lists.todo_list_id) {
+                            all_cards.extend(cards.into_iter().map(|c| (c, false)));
+                        }
+                        // doing list (treat as not done)
+                        if let Ok(cards) = client.fetch_cards(&lists.doing_list_id) {
+                            all_cards.extend(cards.into_iter().map(|c| (c, false)));
+                        }
+                        // done list
+                        if let Ok(cards) = client.fetch_cards(&lists.done_list_id) {
+                            all_cards.extend(cards.into_iter().map(|c| (c, true)));
+                        }
+
+                        // 4) Merge into local todos for the current project (by planka_card_id)
+                        let mut index_by_card: HashMap<String, usize> = HashMap::new();
+                        for (i, t) in self.todos.iter().enumerate() {
+                            if t.project == self.current_project {
+                                if let Some(ref cid) = t.planka_card_id {
+                                    index_by_card.insert(cid.clone(), i);
+                                }
+                            }
+                        }
+
+                        for (card, is_done) in all_cards {
+                            if let Some(&idx) = index_by_card.get(&card.id) {
+                                // Update existing
+                                if let Some(t) = self.todos.get_mut(idx) {
+                                    t.description = card.name.clone();
+                                    t.done = is_done;
+                                    t.due_date = card
+                                        .due
+                                        .as_deref()
+                                        .and_then(|s| format_planka_due(s));
+                                    t.planka_list_id = if is_done {
+                                        Some(lists.done_list_id.clone())
+                                    } else {
+                                        Some(lists.todo_list_id.clone())
+                                    };
+                                    t.planka_board_id = Some(lists.board_id.clone());
+                                }
+                            } else {
+                                // Insert new
+                                self.todos.push(Todo {
+                                    description: card.name.clone(),
+                                    done: is_done,
+                                    due_date: card.due.as_deref().and_then(|s| format_planka_due(s)),
+                                    created_date: Local::now().format("%Y-%m-%d").to_string(),
+                                    project: self.current_project.clone(),
+                                    planka_card_id: Some(card.id.clone()),
+                                    planka_list_id: if is_done {
+                                        Some(lists.done_list_id.clone())
+                                    } else {
+                                        Some(lists.todo_list_id.clone())
+                                    },
+                                    planka_board_id: Some(lists.board_id.clone()),
+                                });
+                            }
+                        }
                         self.error_message = Some("Synced from Planka".to_string());
                     }
                     Err(e) => self.error_message = Some(e),

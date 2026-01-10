@@ -554,10 +554,110 @@ impl PlankaClient {
         Ok(())
     }
 
-    pub fn fetch_cards(&self, _list_id: &str) -> Result<Vec<PlankaCard>, String> {
+    pub fn fetch_cards(&self, list_id: &str) -> Result<Vec<PlankaCard>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let auth = self.auth_header();
+        // Try 1: /api/lists/{id}?include=cards
+        let url1 = format!("{}/api/lists/{}?include=cards", base, list_id);
         #[cfg(debug_assertions)]
-        log_debug(&format!("fetch_cards(list_id={}) called (stub returns empty)", _list_id));
-        Ok(vec![])
+        log_http_request(
+            "GET",
+            &url1,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp1 = self.client
+            .get(&url1)
+            .header("Authorization", auth.clone())
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send();
+        if let Ok(r) = resp1 {
+            let status = r.status();
+            let text = r.text().unwrap_or_default();
+            #[cfg(debug_assertions)]
+            log_http_response(status.as_u16(), &text);
+            if status.is_success() && !text.trim_start().starts_with('<') {
+                if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                    if let Some(arr) = v
+                        .get("included")
+                        .and_then(|i| i.get("cards"))
+                        .and_then(|x| x.as_array())
+                    {
+                        let mut out = Vec::new();
+                        for c in arr {
+                            if let (Some(id), Some(name)) = (
+                                c.get("id").and_then(|x| x.as_str()),
+                                c.get("name").and_then(|x| x.as_str()),
+                            ) {
+                                let due = c
+                                    .get("dueDate")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                            }
+                        }
+                        return Ok(out);
+                    }
+                }
+            }
+        }
+
+        // Try 2: /api/cards?listId=...
+        let url2 = format!("{}/api/cards?listId={}", base, list_id);
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "GET",
+            &url2,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp2 = self.client
+            .get(&url2)
+            .header("Authorization", auth.clone())
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url2, e))?;
+        let status = resp2.status();
+        let text = resp2.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Ok(vec![]);
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse cards failed: {}", e))?;
+        let mut out = Vec::new();
+        if let Some(arr) = v.as_array() {
+            for c in arr {
+                if let (Some(id), Some(name)) = (
+                    c.get("id").and_then(|x| x.as_str()),
+                    c.get("name").and_then(|x| x.as_str()),
+                ) {
+                    let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                }
+            }
+        } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+            for c in items {
+                if let (Some(id), Some(name)) = (
+                    c.get("id").and_then(|x| x.as_str()),
+                    c.get("name").and_then(|x| x.as_str()),
+                ) {
+                    let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                }
+            }
+        }
+        Ok(out)
     }
 }
 
