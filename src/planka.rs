@@ -1,8 +1,7 @@
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
-#[cfg(debug_assertions)]
-use serde_json::json;
+use serde_json::{json, Value, Map};
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write as IoWrite};
 use std::path::PathBuf;
@@ -187,35 +186,229 @@ impl PlankaClient {
     }
 
     pub fn fetch_boards(&self) -> Result<Vec<PlankaBoard>, String> {
-        #[cfg(debug_assertions)]
-        log_debug("fetch_boards() called (stub returns empty)");
-        // TODO: replace with real GET to list user's boards/projects.
-        Ok(vec![])
+        let base = self.base_url.trim_end_matches('/');
+        let try_urls = vec![
+            format!("{}/api/boards", base),
+            format!("{}/api/projects", base),
+        ];
+        let mut boards: Vec<PlankaBoard> = Vec::new();
+        for url in try_urls {
+            let auth = self.auth_header();
+            #[cfg(debug_assertions)]
+            log_http_request("GET", &url, &[("Authorization", auth.as_str())], None);
+            let resp = self.client
+                .get(&url)
+                .header("Authorization", auth)
+                .send()
+                .map_err(|e| format!("GET {} failed: {}", url, e))?;
+            let status = resp.status();
+            let text = resp.text().map_err(|e| format!("read {} failed: {}", url, e))?;
+            #[cfg(debug_assertions)]
+            log_http_response(status.as_u16(), &text);
+            if !status.is_success() {
+                continue;
+            }
+            let v: Value = serde_json::from_str(&text)
+                .map_err(|e| format!("parse {} failed: {}", url, e))?;
+            // case 1: array of boards
+            if let Some(arr) = v.as_array() {
+                for b in arr {
+                    if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
+                        let name = b.get("name").and_then(|x| x.as_str())
+                            .or_else(|| b.get("title").and_then(|x| x.as_str()))
+                            .unwrap_or("");
+                        if !name.is_empty() {
+                            boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                        }
+                    }
+                }
+            // case 2: object with items[]
+            } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+                for b in items {
+                    if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
+                        let name = b.get("name").and_then(|x| x.as_str())
+                            .or_else(|| b.get("title").and_then(|x| x.as_str()))
+                            .unwrap_or("");
+                        if !name.is_empty() {
+                            boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                        }
+                    }
+                }
+            // case 3: projects[].boards[]
+            } else if let Some(projects) = v.get("projects").and_then(|x| x.as_array()) {
+                for p in projects {
+                    if let Some(boards_arr) = p.get("boards").and_then(|x| x.as_array()) {
+                        for b in boards_arr {
+                            if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
+                                let name = b.get("name").and_then(|x| x.as_str())
+                                    .or_else(|| b.get("title").and_then(|x| x.as_str()))
+                                    .unwrap_or("");
+                                if !name.is_empty() {
+                                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !boards.is_empty() { break; }
+        }
+        Ok(boards)
     }
 
-    // TODO: Fill with actual Planka endpoints.
-    pub fn resolve_lists(&self, _board_name: &str) -> Result<PlankaLists, String> {
-        #[cfg(debug_assertions)]
-        log_debug(&format!("resolve_lists(board_name={}) called (not implemented)", _board_name));
-        Err("Planka list resolution not yet implemented (fill endpoints)".into())
+    pub fn resolve_lists(&self, board_name: &str) -> Result<PlankaLists, String> {
+        let boards = self.fetch_boards()?;
+        let board = boards
+            .into_iter()
+            .find(|b| b.name.eq_ignore_ascii_case(board_name))
+            .ok_or_else(|| format!("Board '{}' not found on Planka", board_name))?;
+        let base = self.base_url.trim_end_matches('/');
+        let candidates = vec![
+            format!("{}/api/boards/{}/lists", base, board.id),
+            format!("{}/api/lists?boardId={}", base, board.id),
+        ];
+        let mut lists: Vec<(String, String)> = Vec::new(); // (id, name)
+        for url in candidates {
+            let auth = self.auth_header();
+            #[cfg(debug_assertions)]
+            log_http_request("GET", &url, &[("Authorization", auth.as_str())], None);
+            let resp = self.client
+                .get(&url)
+                .header("Authorization", auth)
+                .send()
+                .map_err(|e| format!("GET {} failed: {}", url, e))?;
+            let status = resp.status();
+            let text = resp.text().map_err(|e| format!("read {} failed: {}", url, e))?;
+            #[cfg(debug_assertions)]
+            log_http_response(status.as_u16(), &text);
+            if !status.is_success() {
+                continue;
+            }
+            let v: Value = serde_json::from_str(&text)
+                .map_err(|e| format!("parse lists failed: {}", e))?;
+            if let Some(arr) = v.as_array() {
+                for l in arr {
+                    if let (Some(id), Some(name)) = (
+                        l.get("id").and_then(|x| x.as_str()),
+                        l.get("name").and_then(|x| x.as_str())
+                            .or_else(|| l.get("title").and_then(|x| x.as_str())),
+                    ) {
+                        lists.push((id.to_string(), name.to_string()));
+                    }
+                }
+            } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+                for l in items {
+                    if let (Some(id), Some(name)) = (
+                        l.get("id").and_then(|x| x.as_str()),
+                        l.get("name").and_then(|x| x.as_str())
+                            .or_else(|| l.get("title").and_then(|x| x.as_str())),
+                    ) {
+                        lists.push((id.to_string(), name.to_string()));
+                    }
+                }
+            }
+            if !lists.is_empty() { break; }
+        }
+        if lists.is_empty() {
+            return Err("No lists found for board".into());
+        }
+        // Match names to todo/doing/done (case- and space-insensitive)
+        let mut todo_id: Option<String> = None;
+        let mut doing_id: Option<String> = None;
+        let mut done_id: Option<String> = None;
+        for (id, name) in &lists {
+            let n = name.to_lowercase().replace(' ', "");
+            if n.contains("todo") || n.contains("to-do") || n.contains("to_do") || n.contains("to.do") {
+                if todo_id.is_none() { todo_id = Some(id.clone()); }
+            } else if n.contains("doing") || n.contains("inprogress") || n.contains("in-progress") || n.contains("in_progress") {
+                if doing_id.is_none() { doing_id = Some(id.clone()); }
+            } else if n.contains("done") || n.contains("completed") || n.contains("complete") {
+                if done_id.is_none() { done_id = Some(id.clone()); }
+            }
+        }
+        let todo = todo_id.ok_or_else(|| "Couldn't find a 'Todo' list on board".to_string())?;
+        let doing = doing_id.unwrap_or_else(|| todo.clone());
+        let done = done_id.ok_or_else(|| "Couldn't find a 'Done' list on board".to_string())?;
+        Ok(PlankaLists {
+            board_id: board.id,
+            todo_list_id: todo,
+            doing_list_id: doing,
+            done_list_id: done,
+        })
     }
 
-    pub fn create_card(&self, _list_id: &str, _name: &str, _due: Option<&str>) -> Result<String, String> {
+    pub fn create_card(&self, list_id: &str, name: &str, due: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards", base);
+        let auth = self.auth_header();
+        // Build body
+        let mut body = Map::new();
+        body.insert("listId".to_string(), Value::String(list_id.to_string()));
+        body.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(d) = due {
+            body.insert("dueDate".to_string(), Value::String(d.to_string()));
+        }
         #[cfg(debug_assertions)]
-        log_debug(&format!(
-            "create_card(list_id={}, name={}, due={:?}) called (not implemented)",
-            _list_id, _name, _due
-        ));
-        Err("Planka create_card not yet implemented (fill endpoint)".into())
+        {
+            let preview = Value::Object(body.clone());
+            log_http_request(
+                "POST",
+                &url,
+                &[("Authorization", auth.as_str()), ("Content-Type", "application/json")],
+                Some(&preview.to_string()),
+            );
+        }
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().map_err(|e| format!("read {} failed: {}", url, e))?;
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Create card failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text)
+            .map_err(|e| format!("parse create_card failed: {}", e))?;
+        if let Some(id) = v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .or_else(|| v.get("id").and_then(|x| x.as_str())) {
+            Ok(id.to_string())
+        } else {
+            Err("Create card response missing id".into())
+        }
     }
 
-    pub fn move_card(&self, _card_id: &str, _to_list_id: &str) -> Result<(), String> {
+    pub fn move_card(&self, card_id: &str, to_list_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}", base, card_id);
+        let auth = self.auth_header();
+        let body = json!({ "listId": to_list_id });
         #[cfg(debug_assertions)]
-        log_debug(&format!(
-            "move_card(card_id={}, to_list_id={}) called (not implemented)",
-            _card_id, _to_list_id
-        ));
-        Err("Planka move_card not yet implemented (fill endpoint)".into())
+        log_http_request(
+            "PATCH",
+            &url,
+            &[("Authorization", auth.as_str()), ("Content-Type", "application/json")],
+            Some(&body.to_string()),
+        );
+        let resp = self.client
+            .patch(&url)
+            .header("Authorization", auth)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Move card failed: HTTP {} - {}", status, text));
+        }
+        Ok(())
     }
 
     pub fn fetch_cards(&self, _list_id: &str) -> Result<Vec<PlankaCard>, String> {
