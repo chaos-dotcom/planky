@@ -194,7 +194,7 @@ impl PlankaClient {
         log_http_request(
             "GET",
             &projects_url,
-            &[("Authorization", auth.as_str()), ("Accept", "application/json")],
+            &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")],
             None,
         );
         let resp = self
@@ -202,6 +202,7 @@ impl PlankaClient {
             .get(&projects_url)
             .header("Authorization", auth.clone())
             .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
             .send()
             .map_err(|e| format!("GET {} failed: {}", projects_url, e))?;
         let status = resp.status();
@@ -248,7 +249,8 @@ impl PlankaClient {
                     b.get("name").and_then(|x| x.as_str())
                         .or_else(|| b.get("title").and_then(|x| x.as_str())),
                 ) {
-                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                    let project_id = b.get("projectId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string(), project_id });
                 }
             }
         }
@@ -263,7 +265,7 @@ impl PlankaClient {
             log_http_request(
                 "GET",
                 &url,
-                &[("Authorization", auth.as_str()), ("Accept", "application/json")],
+                &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")],
                 None,
             );
             let resp = self
@@ -271,6 +273,7 @@ impl PlankaClient {
                 .get(&url)
                 .header("Authorization", auth.clone())
                 .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
                 .send()
                 .map_err(|e| format!("GET {} failed: {}", url, e))?;
             let status = resp.status();
@@ -293,7 +296,16 @@ impl PlankaClient {
                         b.get("name").and_then(|x| x.as_str())
                             .or_else(|| b.get("title").and_then(|x| x.as_str())),
                     ) {
-                        boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                        let project_id = b
+                            .get("projectId")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string())
+                            .or_else(|| Some(pid.clone()));
+                        boards.push(PlankaBoard {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            project_id,
+                        });
                     }
                 }
             } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
@@ -303,7 +315,16 @@ impl PlankaClient {
                         b.get("name").and_then(|x| x.as_str())
                             .or_else(|| b.get("title").and_then(|x| x.as_str())),
                     ) {
-                        boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                        let project_id = b
+                            .get("projectId")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string())
+                            .or_else(|| Some(pid.clone()));
+                        boards.push(PlankaBoard {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            project_id,
+                        });
                     }
                 }
             }
@@ -318,60 +339,120 @@ impl PlankaClient {
             .find(|b| b.name.eq_ignore_ascii_case(board_name))
             .ok_or_else(|| format!("Board '{}' not found on Planka", board_name))?;
         let base = self.base_url.trim_end_matches('/');
-        let candidates = vec![
-            format!("{}/api/boards/{}/lists", base, board.id),
-            format!("{}/api/lists?boardId={}", base, board.id),
-        ];
         let mut lists: Vec<(String, String)> = Vec::new(); // (id, name)
-        for url in candidates {
+
+        // Attempt 1: GET /api/boards/{id}?include=lists
+        {
+            let url = format!("{}/api/boards/{}?include=lists", base, board.id);
             let auth = self.auth_header();
             #[cfg(debug_assertions)]
-            log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
-            let resp = self.client
+            log_http_request(
+                "GET",
+                &url,
+                &[
+                    ("Authorization", auth.as_str()),
+                    ("Accept", "application/json"),
+                    ("X-Requested-With", "XMLHttpRequest"),
+                ],
+                None,
+            );
+            let resp = self
+                .client
                 .get(&url)
-                .header("Authorization", auth)
+                .header("Authorization", auth.clone())
                 .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
                 .send()
                 .map_err(|e| format!("GET {} failed: {}", url, e))?;
             let status = resp.status();
             let text = resp.text().map_err(|e| format!("read {} failed: {}", url, e))?;
             #[cfg(debug_assertions)]
             log_http_response(status.as_u16(), &text);
-            if !status.is_success() {
-                continue;
-            }
-            // Skip HTML SPA responses
-            if text.trim_start().starts_with('<') {
-                continue;
-            }
-            let v: Value = serde_json::from_str(&text)
-                .map_err(|e| format!("parse lists failed: {}", e))?;
-            if let Some(arr) = v.as_array() {
-                for l in arr {
-                    if let (Some(id), Some(name)) = (
-                        l.get("id").and_then(|x| x.as_str()),
-                        l.get("name").and_then(|x| x.as_str())
-                            .or_else(|| l.get("title").and_then(|x| x.as_str())),
-                    ) {
-                        lists.push((id.to_string(), name.to_string()));
-                    }
-                }
-            } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
-                for l in items {
-                    if let (Some(id), Some(name)) = (
-                        l.get("id").and_then(|x| x.as_str()),
-                        l.get("name").and_then(|x| x.as_str())
-                            .or_else(|| l.get("title").and_then(|x| x.as_str())),
-                    ) {
-                        lists.push((id.to_string(), name.to_string()));
+            if status.is_success() && !text.trim_start().starts_with('<') {
+                if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                    if let Some(arr) = v
+                        .get("included")
+                        .and_then(|i| i.get("lists"))
+                        .and_then(|x| x.as_array())
+                    {
+                        for l in arr {
+                            if let (Some(id), Some(name)) = (
+                                l.get("id").and_then(|x| x.as_str()),
+                                l.get("name")
+                                    .and_then(|x| x.as_str())
+                                    .or_else(|| l.get("title").and_then(|x| x.as_str())),
+                            ) {
+                                lists.push((id.to_string(), name.to_string()));
+                            }
+                        }
                     }
                 }
             }
-            if !lists.is_empty() { break; }
         }
+
+        // Attempt 2: GET /api/projects/{projectId}?include=boards,lists and filter by boardId
+        if lists.is_empty() {
+            if let Some(ref project_id) = board.project_id {
+                let url = format!("{}/api/projects/{}?include=boards,lists", base, project_id);
+                let auth = self.auth_header();
+                #[cfg(debug_assertions)]
+                log_http_request(
+                    "GET",
+                    &url,
+                    &[
+                        ("Authorization", auth.as_str()),
+                        ("Accept", "application/json"),
+                        ("X-Requested-With", "XMLHttpRequest"),
+                    ],
+                    None,
+                );
+                let resp = self
+                    .client
+                    .get(&url)
+                    .header("Authorization", auth.clone())
+                    .header("Accept", "application/json")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .send()
+                    .map_err(|e| format!("GET {} failed: {}", url, e))?;
+                let status = resp.status();
+                let text = resp.text().map_err(|e| format!("read {} failed: {}", url, e))?;
+                #[cfg(debug_assertions)]
+                log_http_response(status.as_u16(), &text);
+                if status.is_success() && !text.trim_start().starts_with('<') {
+                    if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                        if let Some(arr) = v
+                            .get("included")
+                            .and_then(|i| i.get("lists"))
+                            .and_then(|x| x.as_array())
+                        {
+                            for l in arr {
+                                let belongs = l
+                                    .get("boardId")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s == board.id)
+                                    .unwrap_or(false);
+                                if !belongs {
+                                    continue;
+                                }
+                                if let (Some(id), Some(name)) = (
+                                    l.get("id").and_then(|x| x.as_str()),
+                                    l.get("name")
+                                        .and_then(|x| x.as_str())
+                                        .or_else(|| l.get("title").and_then(|x| x.as_str())),
+                                ) {
+                                    lists.push((id.to_string(), name.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if lists.is_empty() {
             return Err("No lists found for board".into());
         }
+
         // Match names to todo/doing/done (case- and space-insensitive)
         let mut todo_id: Option<String> = None;
         let mut doing_id: Option<String> = None;
@@ -543,6 +624,7 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
 pub struct PlankaBoard {
     pub id: String,
     pub name: String,
+    pub project_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
