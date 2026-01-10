@@ -484,22 +484,23 @@ impl PlankaClient {
 
     pub fn create_card(&self, list_id: &str, name: &str, due: Option<&str>) -> Result<String, String> {
         let base = self.base_url.trim_end_matches('/');
-        let url = format!("{}/api/cards", base);
+        let url = format!("{}/api/lists/{}/cards", base, list_id);
         let auth = self.auth_header();
         // Build body
         let mut body = Map::new();
-        body.insert("listId".to_string(), Value::String(list_id.to_string()));
         body.insert("name".to_string(), Value::String(name.to_string()));
         if let Some(d) = due {
             body.insert("dueDate".to_string(), Value::String(d.to_string()));
         }
+        body.insert("position".to_string(), Value::from(65536));
+        body.insert("type".to_string(), Value::String("project".to_string()));
         #[cfg(debug_assertions)]
         {
             let preview = Value::Object(body.clone());
             log_http_request(
                 "POST",
                 &url,
-                &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")],
+                &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest"), ("Content-Type", "application/json")],
                 Some(&preview.to_string()),
             );
         }
@@ -507,6 +508,7 @@ impl PlankaClient {
             .post(&url)
             .header("Authorization", auth)
             .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
