@@ -309,10 +309,21 @@ impl App {
                             if let Ok(cid) = client.create_card(&lists.todo_list_id, &name, due) {
                                 // Update the first matching local todo without card id
                                 if let Some(t) = self.todos.iter_mut().find(|t| t.project == op.project && t.planka_card_id.is_none() && t.description == name) {
-                                    t.planka_card_id = Some(cid);
+                                    // Capture desired target before overwriting list_id
+                                    let wants_doing = t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str());
+                                    let wants_done = t.done;
+                                    t.planka_card_id = Some(cid.clone());
                                     t.planka_list_id = Some(lists.todo_list_id.clone());
                                     t.planka_board_id = Some(lists.board_id.clone());
                                     t.sync_dirty = false;
+                                    // If user had toggled Doing (or Done) before create succeeded, move now
+                                    if wants_doing {
+                                        let _ = client.move_card(&cid, &lists.doing_list_id);
+                                        t.planka_list_id = Some(lists.doing_list_id.clone());
+                                    } else if wants_done {
+                                        let _ = client.move_card(&cid, &lists.done_list_id);
+                                        t.planka_list_id = Some(lists.done_list_id.clone());
+                                    }
                                 }
                                 // Remove op
                                 if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
@@ -863,6 +874,78 @@ impl App {
 
         if let Some(todo) = self.todos.get_mut(idx) {
             todo.done = new_done;
+        }
+    }
+
+    pub fn mark_doing(&mut self) {
+        let Some(idx) = self.selected_index_in_all() else { return; };
+        // Read needed values without holding a mutable borrow of self
+        let (card_id_opt, was_done, current_list_id) = {
+            let t = &self.todos[idx];
+            (t.planka_card_id.clone(), t.done, t.planka_list_id.clone())
+        };
+        // Doing is only for not-done items
+        let target_is_doing: bool;
+        let lists = match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
+                    l
+                } else {
+                    match client.resolve_lists(&self.current_project) {
+                        Ok(l) => {
+                            self.planka_lists_by_board.insert(self.current_project.clone(), l.clone());
+                            self.planka_lists = Some(l.clone());
+                            l
+                        }
+                        Err(e) => {
+                            self.error_message = Some(e);
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                self.error_message = Some(e);
+                return;
+            }
+        };
+        // Decide toggle target based on current list
+        target_is_doing = current_list_id.as_deref() != Some(lists.doing_list_id.as_str());
+        let target_list = if target_is_doing { &lists.doing_list_id } else { &lists.todo_list_id };
+        // Move remote if we have a card id
+        if let Some(ref cid) = card_id_opt {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Err(e) = client.move_card(cid, target_list) {
+                    self.error_message = Some(format!("Planka move to Doing failed: {}", e));
+                    // Queue a move only if we have a card id
+                    self.enqueue_op(PendingOp {
+                        kind: PendingOpKind::Move,
+                        project: self.current_project.clone(),
+                        card_id: Some(cid.clone()),
+                        list_id: Some(target_list.clone()),
+                        name: None,
+                        due: None,
+                        ts: Local::now().timestamp(),
+                    });
+                    if let Some(t) = self.todos.get_mut(idx) {
+                        t.sync_dirty = true;
+                    }
+                } else {
+                    if let Some(t) = self.todos.get_mut(idx) {
+                        t.planka_list_id = Some(target_list.clone());
+                    }
+                }
+            }
+        } else {
+            // No remote id: reflect locally; background queue cannot move without id
+            if let Some(t) = self.todos.get_mut(idx) {
+                t.planka_list_id = Some(target_list.clone());
+                t.sync_dirty = true;
+            }
+        }
+        // Ensure not done when marking Doing; clearing done state locally if set
+        if let Some(t) = self.todos.get_mut(idx) {
+            t.done = false;
         }
     }
 

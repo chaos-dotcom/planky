@@ -46,6 +46,9 @@ where
                         KeyCode::Char('d') => app.delete_todo(),
                         KeyCode::Char('m') => app.mark_done(),
                         KeyCode::Char('/') => {
+                            app.mark_doing();
+                        }
+                        KeyCode::Char('?') => {
                             app.input_mode = InputMode::Searching;
                             app.search_query.clear();
                         }
@@ -282,6 +285,8 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::styled("d", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to delete, "),
         Span::styled("/", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" mark doing, "),
+        Span::styled("?", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to search, "),
         Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to quit"),
@@ -314,13 +319,20 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 .due_date
                 .clone()
                 .unwrap_or_else(|| "No due date".to_string());
-            let desc_color = if t.done {
+            let mut desc_color = if t.done {
                 Color::Green
             } else if is_overdue(&due_date_str) {
                 Color::Red
             } else {
                 Color::Yellow
             };
+            if !t.done {
+                if let Some(lists) = app.planka_lists_by_board.get(&app.current_project) {
+                    if t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str()) {
+                        desc_color = Color::Cyan;
+                    }
+                }
+            }
             let line = Line::from(vec![
                 Span::raw(format!("{} ", status)),
                 Span::styled(&t.description, Style::default().fg(desc_color)),
