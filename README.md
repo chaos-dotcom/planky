@@ -26,44 +26,6 @@ Manage your tasks visually with an intuitive TUI—add, list, mark as done, and 
 
 ---
 
-## Download
-
-Get the latest release from the [Releases page](https://github.com/KushalMeghani1644/Planky/releases).
-
-| Platform   | Download                                              |
-|------------|-------------------------------------------------------|
-| Linux      | `Planky-v2.1.1.tar.gz`                      |
-| Windows    | `Planky-v2.1.1(windows).zip`                       |
-=======
-| Linux      | `Planky-v2.1.1.tar.gz`                      |
-| Windows    | `Planky-v2.1.1(windows).zip`                       |
-
----
-
-## How to Use
-
-### Run Pre-Built Binary
-
-1. Download the release for your platform.  
-2. Extract the archive:
-```bash
-# For Linux
-tar -xzf Planky-v2.1.1-linux.tar.gz
->>>>>>> c931762491b113cfb94339e1ddbefe0f3d1ea14e
-=======
-tar -xzf Planky-v2.1.1-linux.tar.gz
->>>>>>> c931762491b113cfb94339e1ddbefe0f3d1ea14e
-
-# For Windows
-# Extract using your preferred archive manager (e.g., 7-Zip)
-
-# Run
-./Planky    # Linux
-Planky.exe  # Windows
-```
-
----
-
 ## TUI Interaction Guide
 
 - Add: a → description → Enter → due date → Enter
@@ -226,9 +188,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the GPL-3.0 License — see the [LICENSE](LICENSE) file for details.
-
----
-
-**Built with ❤️ in Rust** 🦀
-
-**Shout-out to [Kivooeo](https://github.com/Kivooeo) for contributing to the code!**
