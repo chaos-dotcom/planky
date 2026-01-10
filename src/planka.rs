@@ -2,9 +2,53 @@ use directories::ProjectDirs;
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::fs::{create_dir_all, File};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
+
+#[cfg(debug_assertions)]
+fn log_http_request(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) {
+    eprintln!("[HTTP OUT] {} {}", method, url);
+    for (k, v) in headers {
+        let shown = if k.eq_ignore_ascii_case("authorization") {
+            mask_bearer(v)
+        } else {
+            (*v).to_string()
+        };
+        eprintln!("  {}: {}", k, shown);
+    }
+    if let Some(b) = body {
+        eprintln!("  Body: {}", truncate(b, 4000));
+    }
+}
+
+#[cfg(debug_assertions)]
+fn log_http_response(status: u16, body: &str) {
+    eprintln!("[HTTP IN] Status: {}", status);
+    eprintln!("  Body: {}", truncate(body, 4000));
+}
+
+#[cfg(debug_assertions)]
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max { s.to_string() } else { format!("{}…(+{} bytes)", &s[..max], s.len() - max) }
+}
+
+#[cfg(debug_assertions)]
+fn mask_bearer(v: &str) -> String {
+    if let Some(token) = v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")) {
+        let head = &token[..token.len().min(6)];
+        let tail = &token[token.len().saturating_sub(4)..];
+        format!("Bearer {}…{}", head, tail)
+    } else {
+        "*****".to_string()
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn log_http_request(_method: &str, _url: &str, _headers: &[(&str, &str)], _body: Option<&str>) {}
+#[cfg(not(debug_assertions))]
+fn log_http_response(_status: u16, _body: &str) {}
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PlankaConfig {
@@ -106,6 +150,21 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
 
     let url = format!("{}/api/access-tokens", server_url.trim_end_matches('/'));
     let client = Client::new();
+    // Debug: log outgoing request (mask password)
+    #[cfg(debug_assertions)]
+    {
+        let preview = json!({
+            "emailOrUsername": email_or_username,
+            "password": "***",
+            "withHttpOnlyToken": false
+        }).to_string();
+        log_http_request(
+            "POST",
+            &url,
+            &[("Content-Type", "application/json")],
+            Some(&preview),
+        );
+    }
     let res = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
@@ -116,11 +175,15 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
         })
         .send()
         .map_err(|e| format!("Login request failed: {}", e))?;
-
-    if !res.status().is_success() {
-        return Err(format!("Login failed: HTTP {}", res.status()));
+    let status = res.status();
+    let text = res.text().map_err(|e| format!("Login read failed: {}", e))?;
+    #[cfg(debug_assertions)]
+    log_http_response(status.as_u16(), &text);
+    if !status.is_success() {
+        return Err(format!("Login failed: HTTP {} - {}", status, text));
     }
-    let body: LoginRes = res.json().map_err(|e| format!("Login parse failed: {}", e))?;
+    let body: LoginRes =
+        serde_json::from_str(&text).map_err(|e| format!("Login parse failed: {}", e))?;
     Ok(body.item)
 }
 
