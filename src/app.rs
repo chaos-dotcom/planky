@@ -105,6 +105,18 @@ fn format_planka_due(s: &str) -> Option<String> {
 }
 
 impl App {
+    fn selected_index_in_all(&self) -> Option<usize> {
+        let mut seen = 0usize;
+        for (i, t) in self.todos.iter().enumerate() {
+            if t.project == self.current_project {
+                if seen == self.selected {
+                    return Some(i);
+                }
+                seen += 1;
+            }
+        }
+        None
+    }
     pub fn new() -> Self {
         Self {
             todos: Vec::new(),
@@ -499,21 +511,28 @@ impl App {
     }
 
     pub fn delete_todo(&mut self) {
-        if !self.todos.is_empty() {
-            self.todos.remove(self.selected);
-            if self.selected > 0 {
-                self.selected -= 1;
+        let Some(idx) = self.selected_index_in_all() else { return; };
+        let card_id = self.todos[idx].planka_card_id.clone();
+        if let Some(ref cid) = card_id {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Err(e) = client.delete_card(cid) {
+                    self.error_message = Some(format!("Planka delete failed: {}", e));
+                }
+            } else if self.error_message.is_none() {
+                // ensure_planka_client sets error_message on failure
             }
+        }
+        self.todos.remove(idx);
+        if self.selected > 0 {
+            self.selected -= 1;
         }
     }
 
     pub fn mark_done(&mut self) {
-        if self.selected >= self.todos.len() {
-            return;
-        }
+        let Some(idx) = self.selected_index_in_all() else { return; };
         // Read needed values without holding a mutable borrow of self
         let (was_done, card_id_opt) = {
-            let todo = &self.todos[self.selected];
+            let todo = &self.todos[idx];
             (todo.done, todo.planka_card_id.clone())
         };
         let new_done = !was_done;
@@ -536,13 +555,12 @@ impl App {
                         }
                     }
                 };
-                if let Some(ref card_id) = card_id_opt
-                {
+                if let Some(ref card_id) = card_id_opt {
                     let target = if new_done { &lists.done_list_id } else { &lists.todo_list_id };
                     if let Err(e) = client.move_card(card_id, target) {
                         self.error_message = Some(format!("Planka move to Done failed: {}", e));
                     } else {
-                        if let Some(todo) = self.todos.get_mut(self.selected) {
+                        if let Some(todo) = self.todos.get_mut(idx) {
                             todo.planka_list_id = Some(target.clone());
                         }
                     }
@@ -550,7 +568,7 @@ impl App {
             }
         }
 
-        if let Some(todo) = self.todos.get_mut(self.selected) {
+        if let Some(todo) = self.todos.get_mut(idx) {
             todo.done = new_done;
         }
     }

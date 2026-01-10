@@ -600,6 +600,39 @@ impl PlankaClient {
         Ok(())
     }
 
+    pub fn delete_card(&self, card_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}", base, card_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "DELETE",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp = self
+            .client
+            .delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Delete card failed: HTTP {} - {}", status, text));
+        }
+        Ok(())
+    }
+
     pub fn fetch_cards(&self, list_id: &str) -> Result<Vec<PlankaCard>, String> {
         let base = self.base_url.trim_end_matches('/');
         let auth = self.auth_header();
