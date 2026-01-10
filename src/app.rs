@@ -226,6 +226,149 @@ impl App {
         }
     }
 
+    pub fn sync_all_projects_from_planka(&mut self) {
+        let client = match self.ensure_planka_client() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error_message = Some(e);
+                return;
+            }
+        };
+        // 1) Fetch boards and reflect as projects
+        if let Ok(boards) = client.fetch_boards() {
+            if !boards.is_empty() {
+                self.planka_boards = boards.clone();
+                self.projects = boards.iter().map(|b| b.name.clone()).collect();
+                if !self.projects.iter().any(|p| p == &self.current_project) {
+                    if let Some(first) = self.projects.get(0) {
+                        self.current_project = first.clone();
+                        self.selected = 0;
+                    }
+                }
+            }
+        }
+        // 2) For each board: resolve lists, pull remote, merge; then push local diffs
+        for b in &self.planka_boards {
+            let proj = b.name.clone();
+            // Resolve and cache lists for this board
+            let lists = if let Some(l) = self.planka_lists_by_board.get(&proj).cloned() {
+                l
+            } else {
+                match client.resolve_lists(&proj) {
+                    Ok(l) => {
+                        self.planka_lists_by_board.insert(proj.clone(), l.clone());
+                        if proj == self.current_project {
+                            self.planka_lists = Some(l.clone());
+                        }
+                        l
+                    }
+                    Err(e) => {
+                        self.error_message = Some(e);
+                        continue;
+                    }
+                }
+            };
+            // Pull: fetch remote cards (todo/doing/done)
+            let mut remote_by_id: HashMap<String, (PlankaCard, bool, String)> = HashMap::new();
+            if let Ok(cards) = client.fetch_cards(&lists.todo_list_id) {
+                for c in cards {
+                    remote_by_id.insert(c.id.clone(), (c, false, lists.todo_list_id.clone()));
+                }
+            }
+            if let Ok(cards) = client.fetch_cards(&lists.doing_list_id) {
+                for c in cards {
+                    remote_by_id.insert(c.id.clone(), (c, false, lists.doing_list_id.clone()));
+                }
+            }
+            if let Ok(cards) = client.fetch_cards(&lists.done_list_id) {
+                for c in cards {
+                    remote_by_id.insert(c.id.clone(), (c, true, lists.done_list_id.clone()));
+                }
+            }
+            // Local index by card id for this project
+            let mut local_index: HashMap<String, usize> = HashMap::new();
+            for (i, t) in self.todos.iter().enumerate() {
+                if t.project == proj {
+                    if let Some(ref cid) = t.planka_card_id {
+                        local_index.insert(cid.clone(), i);
+                    }
+                }
+            }
+            // Merge remote -> local
+            for (_cid, (rcard, rdone, rlist)) in &remote_by_id {
+                if let Some(&idx) = local_index.get(&rcard.id) {
+                    if let Some(t) = self.todos.get_mut(idx) {
+                        t.description = rcard.name.clone();
+                        t.done = *rdone;
+                        t.due_date = rcard
+                            .due
+                            .as_deref()
+                            .and_then(|s| format_planka_due(s));
+                        t.planka_list_id = Some(rlist.clone());
+                        t.planka_board_id = Some(lists.board_id.clone());
+                    }
+                } else {
+                    // Create local for remote-only card
+                    self.todos.push(Todo {
+                        description: rcard.name.clone(),
+                        done: *rdone,
+                        due_date: rcard.due.as_deref().and_then(|s| format_planka_due(s)),
+                        created_date: Local::now().format("%Y-%m-%d").to_string(),
+                        project: proj.clone(),
+                        planka_card_id: Some(rcard.id.clone()),
+                        planka_list_id: Some(rlist.clone()),
+                        planka_board_id: Some(lists.board_id.clone()),
+                    });
+                }
+            }
+            // Push local -> remote
+            for t in self.todos.iter_mut().filter(|t| t.project == proj) {
+                // New local: create remote
+                if t.planka_card_id.is_none() {
+                    match client.create_card(&lists.todo_list_id, &t.description, t.due_date.as_deref()) {
+                        Ok(cid) => {
+                            t.planka_card_id = Some(cid);
+                            t.planka_list_id = Some(lists.todo_list_id.clone());
+                            t.planka_board_id = Some(lists.board_id.clone());
+                        }
+                        Err(e) => {
+                            self.error_message = Some(format!("Planka create card failed: {}", e));
+                        }
+                    }
+                    continue;
+                }
+                // Existing linked: ensure list matches done-state and fields updated
+                if let Some(ref cid) = t.planka_card_id.clone() {
+                    let desired_list = if t.done { &lists.done_list_id } else { &lists.todo_list_id };
+                    let remote = remote_by_id.get(cid);
+                    // Move if list differs
+                    if remote.map(|(_, _, l)| l.as_str()) != Some(desired_list.as_str()) {
+                        if let Err(e) = client.move_card(cid, desired_list) {
+                            self.error_message = Some(format!("Planka move failed: {}", e));
+                        } else {
+                            t.planka_list_id = Some(desired_list.clone());
+                        }
+                    }
+                    // Update name/due if differ
+                    if let Some((rcard, _rdone, _)) = remote {
+                        let due_disp = t.due_date.clone();
+                        let due_raw = due_disp.as_deref();
+                        let name_changed = rcard.name != t.description;
+                        let due_changed = rcard.due.as_deref() != due_raw;
+                        if name_changed || due_changed {
+                            let _ = client.update_card(
+                                cid,
+                                if name_changed { Some(&t.description) } else { None },
+                                if due_changed { due_raw } else { None },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        self.error_message = Some("Synced all projects from Planka".to_string());
+    }
+
     pub fn start_planka_setup(&mut self) {
         self.planka_setup = Some(PlankaSetupStep::Url);
         self.input_planka = self
