@@ -354,6 +354,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         f.render_widget(search_input, chunks[3]);
     }
 
+    let caret = "|";
     // Description and due date input fields (unchanged)
     let description_style = if matches!(app.input_mode, InputMode::EditingDescription) {
         Style::default()
@@ -476,8 +477,10 @@ pub fn parse_due_date(input: &str) -> Result<String, String> {
         // "in X unit Y unit" patterns (e.g., "in 1 day 3 hours")
         ["in", num1, unit1, num2, unit2] => parse_compound_offset(num1, unit1, num2, unit2, &now),
 
-        // Date + Time (place before generic [num, unit])
-        [date_str, time_str] => parse_date_time_combo(date_str, time_str),
+        // Date + time (YYYY-MM-DD HH:MM)
+        [date_str, time_str] if looks_like_date(date_str) && looks_like_time(time_str) => {
+            parse_date_time_combo(date_str, time_str)
+        },
 
         // Weekday + time (e.g., "friday 15:30") — also before [num, unit]
         [day, time] if is_weekday(day) => parse_weekday_time(day, time, today),
@@ -715,6 +718,13 @@ fn try_parse_date_or_time(
     }
 
     Err("Invalid date or time format".to_string())
+}
+
+fn looks_like_date(s: &str) -> bool {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+}
+fn looks_like_time(s: &str) -> bool {
+    NaiveTime::parse_from_str(s, "%H:%M").is_ok()
 }
 
 fn parse_date_time_combo(date_str: &str, time_str: &str) -> Result<String, String> {
