@@ -554,6 +554,52 @@ impl PlankaClient {
         Ok(())
     }
 
+    pub fn update_card(&self, card_id: &str, name: Option<&str>, due: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}", base, card_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(n) = name {
+            body.insert("name".to_string(), Value::String(n.to_string()));
+        }
+        if let Some(d) = due {
+            body.insert("dueDate".to_string(), Value::String(d.to_string()));
+        }
+        if body.is_empty() {
+            return Ok(());
+        }
+        #[cfg(debug_assertions)]
+        {
+            let preview = Value::Object(body.clone());
+            log_http_request(
+                "PATCH",
+                &url,
+                &[
+                    ("Authorization", auth.as_str()),
+                    ("Accept", "application/json"),
+                    ("Content-Type", "application/json"),
+                ],
+                Some(&preview.to_string()),
+            );
+        }
+        let resp = self.client
+            .patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Update card failed: HTTP {} - {}", status, text));
+        }
+        Ok(())
+    }
+
     pub fn fetch_cards(&self, list_id: &str) -> Result<Vec<PlankaCard>, String> {
         let base = self.base_url.trim_end_matches('/');
         let auth = self.auth_header();

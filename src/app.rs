@@ -71,6 +71,8 @@ pub struct App {
     #[serde(skip)]
     pub planka_lists: Option<PlankaLists>,
     #[serde(skip)]
+    pub planka_lists_by_board: HashMap<String, PlankaLists>,
+    #[serde(skip)]
     pub planka_boards: Vec<PlankaBoard>,
     #[serde(skip)]
     pub input_planka: String,
@@ -117,6 +119,7 @@ impl App {
             input_project: String::new(),
             planka_config: planka::load_config(),
             planka_lists: None,
+            planka_lists_by_board: HashMap::new(),
             planka_boards: Vec::new(),
             input_planka: String::new(),
             planka_setup: None,
@@ -310,12 +313,22 @@ impl App {
             planka_board_id: None,
         };
         if let Ok(client) = self.ensure_planka_client() {
-            if self.planka_lists.is_none() {
-                if let Ok(lists) = client.resolve_lists(&self.current_project) {
-                    self.planka_lists = Some(lists);
+            let lists = if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
+                l
+            } else {
+                match client.resolve_lists(&self.current_project) {
+                    Ok(l) => {
+                        self.planka_lists_by_board.insert(self.current_project.clone(), l.clone());
+                        self.planka_lists = Some(l.clone());
+                        l
+                    }
+                    Err(e) => {
+                        self.error_message = Some(e);
+                        return Ok(());
+                    }
                 }
-            }
-            if let Some(ref lists) = self.planka_lists {
+            };
+            {
                 match client.create_card(&lists.todo_list_id, &todo.description, due_date_str.as_deref()) {
                     Ok(card_id) => {
                         todo.planka_card_id = Some(card_id);
@@ -362,22 +375,32 @@ impl App {
         };
         let new_done = !was_done;
 
-        // If marking done, attempt to move the card on Planka first
-        if new_done {
+        // If changing done-state, attempt to move the card on Planka
+        if new_done || (!new_done && was_done) {
             if let Ok(client) = self.ensure_planka_client() {
-                if self.planka_lists.is_none() {
-                    if let Ok(lists) = client.resolve_lists(&self.current_project) {
-                        self.planka_lists = Some(lists);
+                let lists = if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
+                    l
+                } else {
+                    match client.resolve_lists(&self.current_project) {
+                        Ok(l) => {
+                            self.planka_lists_by_board.insert(self.current_project.clone(), l.clone());
+                            self.planka_lists = Some(l.clone());
+                            l
+                        }
+                        Err(e) => {
+                            self.error_message = Some(e);
+                            return;
+                        }
                     }
-                }
-                if let (Some(ref lists), Some(ref card_id)) =
-                    (self.planka_lists.as_ref(), card_id_opt.as_ref())
+                };
+                if let Some(ref card_id) = card_id_opt
                 {
-                    if let Err(e) = client.move_card(card_id, &lists.done_list_id) {
+                    let target = if new_done { &lists.done_list_id } else { &lists.todo_list_id };
+                    if let Err(e) = client.move_card(card_id, target) {
                         self.error_message = Some(format!("Planka move to Done failed: {}", e));
                     } else {
                         if let Some(todo) = self.todos.get_mut(self.selected) {
-                            todo.planka_list_id = Some(lists.done_list_id.clone());
+                            todo.planka_list_id = Some(target.clone());
                         }
                     }
                 }

@@ -96,7 +96,7 @@ where
                             app.error_message = None;
                         }
                         KeyCode::Char('S') => {
-                            app.sync_current_project_from_planka();
+                            app.sync_all_projects_from_planka();
                         }
                         KeyCode::Char('L') => {
                             app.start_planka_setup();
