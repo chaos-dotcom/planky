@@ -532,7 +532,10 @@ impl PlankaClient {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{}/api/cards/{}", base, card_id);
         let auth = self.auth_header();
-        let body = json!({ "listId": to_list_id });
+        let body = json!({
+            "listId": to_list_id,
+            "position": 65536
+        });
         #[cfg(debug_assertions)]
         log_http_request(
             "PATCH",
