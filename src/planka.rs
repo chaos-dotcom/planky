@@ -4,30 +4,40 @@ use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use serde_json::json;
-use std::fs::{create_dir_all, File};
-use std::io::{BufReader, BufWriter};
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{BufReader, BufWriter, Write as IoWrite};
 use std::path::PathBuf;
 
 #[cfg(debug_assertions)]
 fn log_http_request(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) {
-    eprintln!("[HTTP OUT] {} {}", method, url);
+    let head = format!("[HTTP OUT] {} {}", method, url);
+    eprintln!("{}", head);
+    log_to_file_line(&head);
     for (k, v) in headers {
         let shown = if k.eq_ignore_ascii_case("authorization") {
             mask_bearer(v)
         } else {
             (*v).to_string()
         };
-        eprintln!("  {}: {}", k, shown);
+        let hline = format!("  {}: {}", k, shown);
+        eprintln!("{}", hline);
+        log_to_file_line(&hline);
     }
     if let Some(b) = body {
-        eprintln!("  Body: {}", truncate(b, 4000));
+        let bline = format!("  Body: {}", truncate(b, 4000));
+        eprintln!("{}", bline);
+        log_to_file_line(&bline);
     }
 }
 
 #[cfg(debug_assertions)]
 fn log_http_response(status: u16, body: &str) {
-    eprintln!("[HTTP IN] Status: {}", status);
-    eprintln!("  Body: {}", truncate(body, 4000));
+    let head = format!("[HTTP IN] Status: {}", status);
+    eprintln!("{}", head);
+    log_to_file_line(&head);
+    let bline = format!("  Body: {}", truncate(body, 4000));
+    eprintln!("{}", bline);
+    log_to_file_line(&bline);
 }
 
 #[cfg(debug_assertions)]
@@ -50,6 +60,41 @@ fn mask_bearer(v: &str) -> String {
 fn log_http_request(_method: &str, _url: &str, _headers: &[(&str, &str)], _body: Option<&str>) {}
 #[cfg(not(debug_assertions))]
 fn log_http_response(_status: u16, _body: &str) {}
+
+#[cfg(debug_assertions)]
+static INIT_LOG_ONCE: std::sync::Once = std::sync::Once::new();
+
+#[cfg(debug_assertions)]
+fn log_file_path() -> PathBuf {
+    let proj = ProjectDirs::from("com", "KushalMeghani", "RustyTodos").expect("proj dirs");
+    let dir = proj.config_dir();
+    create_dir_all(dir).ok();
+    dir.join("planka_debug.log")
+}
+
+#[cfg(debug_assertions)]
+fn log_to_file_line(s: &str) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_file_path()) {
+        let _ = writeln!(f, "{}", s);
+    }
+}
+
+#[cfg(debug_assertions)]
+fn log_debug(msg: &str) {
+    let line = format!("[DEBUG] {}", msg);
+    eprintln!("{}", line);
+    log_to_file_line(&line);
+}
+
+#[cfg(debug_assertions)]
+fn init_log_notice() {
+    INIT_LOG_ONCE.call_once(|| {
+        let path = log_file_path();
+        let note = format!("Planka debug logs -> {}", path.display());
+        eprintln!("{}", note);
+        log_to_file_line(&note);
+    });
+}
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PlankaConfig {
@@ -89,13 +134,25 @@ pub struct PlankaClient {
 
 impl PlankaClient {
     pub fn from_config(mut cfg: PlankaConfig) -> Result<(Self, PlankaConfig), String> {
+        #[cfg(debug_assertions)]
+        init_log_notice();
+        #[cfg(debug_assertions)]
+        log_debug("PlankaClient::from_config called");
         if cfg.server_url.trim().is_empty() {
             return Err("Planka server URL is empty".into());
         }
         if cfg.token.is_none() {
+            #[cfg(debug_assertions)]
+            log_debug("No existing token in config; attempting login");
             let token = login(&cfg.server_url, &cfg.email_or_username, &cfg.password)?;
             cfg.token = Some(token);
+            #[cfg(debug_assertions)]
+            log_debug("Login successful; token stored in config");
             let _ = save_config(&cfg);
+        }
+        #[cfg(debug_assertions)]
+        if cfg.token.is_some() {
+            log_debug("Using existing token from config");
         }
         let token = cfg.token.clone().unwrap();
         let client = Client::builder()
@@ -118,24 +175,40 @@ impl PlankaClient {
 
     // TODO: Fill with actual Planka endpoints.
     pub fn resolve_lists(&self, _board_name: &str) -> Result<PlankaLists, String> {
+        #[cfg(debug_assertions)]
+        log_debug(&format!("resolve_lists(board_name={}) called (not implemented)", _board_name));
         Err("Planka list resolution not yet implemented (fill endpoints)".into())
     }
 
     pub fn create_card(&self, _list_id: &str, _name: &str, _due: Option<&str>) -> Result<String, String> {
+        #[cfg(debug_assertions)]
+        log_debug(&format!(
+            "create_card(list_id={}, name={}, due={:?}) called (not implemented)",
+            _list_id, _name, _due
+        ));
         Err("Planka create_card not yet implemented (fill endpoint)".into())
     }
 
     pub fn move_card(&self, _card_id: &str, _to_list_id: &str) -> Result<(), String> {
+        #[cfg(debug_assertions)]
+        log_debug(&format!(
+            "move_card(card_id={}, to_list_id={}) called (not implemented)",
+            _card_id, _to_list_id
+        ));
         Err("Planka move_card not yet implemented (fill endpoint)".into())
     }
 
     pub fn fetch_cards(&self, _list_id: &str) -> Result<Vec<PlankaCard>, String> {
+        #[cfg(debug_assertions)]
+        log_debug(&format!("fetch_cards(list_id={}) called (stub returns empty)", _list_id));
         Ok(vec![])
     }
 }
 
 // POST /api/access-tokens
 fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<String, String> {
+    #[cfg(debug_assertions)]
+    init_log_notice();
     #[derive(Serialize)]
     struct LoginReq<'a> {
         #[serde(rename = "emailOrUsername")]
@@ -185,6 +258,8 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
     }
     let body: LoginRes =
         serde_json::from_str(&text).map_err(|e| format!("Login parse failed: {}", e))?;
+    #[cfg(debug_assertions)]
+    log_debug("Login succeeded and token parsed");
     Ok(body.item)
 }
 
