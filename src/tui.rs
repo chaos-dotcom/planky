@@ -330,7 +330,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::styled("d", b), Span::raw(" done, "),
             Span::styled("w", b), Span::raw(" doing, "),
             Span::styled("Shift+Backspace", b), Span::raw(" delete, "),
-            Span::styled("C", b), Span::raw(" copy, "),
+            Span::styled("c", b), Span::raw(" copy, "),
             Span::styled("p", b), Span::raw(" paste"),
         ]),
         Line::from(vec![
