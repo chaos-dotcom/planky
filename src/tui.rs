@@ -49,7 +49,7 @@ where
                         }
                         KeyCode::Char('d') => app.delete_todo(),
                         KeyCode::Char('m') => app.mark_done(),
-                        KeyCode::Char('k') => {
+                        KeyCode::Char('W') => {
                             app.mark_doing();
                         }
                         KeyCode::Char('?') => {
@@ -66,7 +66,7 @@ where
                                 app.selected -= 1;
                             }
                         }
-                        KeyCode::Char('y') => {
+                        KeyCode::Char('C') => {
                             let list = filtered_todos(app);
                             if let Some(todo) = list.get(app.selected) {
                                 if let Err(e) = copy_to_clipboard(&todo.description) {
@@ -323,9 +323,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::styled("a", b), Span::raw(" add, "),
             Span::styled("e", b), Span::raw(" edit, "),
             Span::styled("m", b), Span::raw(" done, "),
-            Span::styled("k", b), Span::raw(" doing, "),
+            Span::styled("W", b), Span::raw(" doing, "),
             Span::styled("d", b), Span::raw(" delete, "),
-            Span::styled("y", b), Span::raw(" copy, "),
+            Span::styled("C", b), Span::raw(" copy, "),
             Span::styled("p", b), Span::raw(" paste"),
         ]),
         Line::from(vec![
