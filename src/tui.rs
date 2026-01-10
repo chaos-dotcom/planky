@@ -17,6 +17,7 @@ use ratatui::{
 use std::{io, time::Duration};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use textwrap::wrap;
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
 where
@@ -340,6 +341,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[1]);
 
+    let list_area = chunks[2];
+    let inner_width = list_area.width.saturating_sub(2) as usize; // minus left/right borders
+
     let todos: Vec<ListItem> = filtered_todos(app)
         .iter()
         .map(|t| {
@@ -359,16 +363,22 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     }
                 }
             }
-            let mut parts: Vec<Span> = vec![
-                Span::raw(format!("{} ", status)),
-                Span::styled(&t.description, Style::default().fg(desc_color)),
-            ];
+            // Build a single visible string, then soft-wrap to list width
+            let mut text = format!("{} {}", status, t.description);
             if let Some(due) = due_opt {
-                parts.push(Span::raw(format!(" (Due: {})", due)));
+                text.push_str(&format!(" (Due: {})", due));
             }
-            parts.push(Span::raw(format!(" [Created: {}]", t.created_date)));
-            let line = Line::from(parts);
-            ListItem::new(line)
+            text.push_str(&format!(" [Created: {}]", t.created_date));
+
+            let wrapped = wrap(&text, inner_width);
+            let lines: Vec<Line> = wrapped
+                .iter()
+                .map(|w| Line::from(Span::styled(
+                    w.to_string(),
+                    Style::default().fg(desc_color),
+                )))
+                .collect();
+            ListItem::new(lines)
         })
         .collect();
 
