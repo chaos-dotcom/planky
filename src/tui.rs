@@ -90,7 +90,7 @@ where
                             app.prev_project();
                             app.selected = 0;
                         }
-                        KeyCode::Char('P') => {
+                        KeyCode::Char('l') => {
                             app.input_mode = InputMode::EditingProject;
                             app.input_project = app.current_project.clone();
                             app.error_message = None;
@@ -265,7 +265,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::raw(" prev, "),
         Span::styled("]", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" next project, "),
-        Span::styled("P", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("l", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" set project"),
     ]))
     .alignment(Alignment::Center);
