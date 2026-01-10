@@ -187,18 +187,70 @@ impl PlankaClient {
 
     pub fn fetch_boards(&self) -> Result<Vec<PlankaBoard>, String> {
         let base = self.base_url.trim_end_matches('/');
-        let try_urls = vec![
-            format!("{}/api/boards", base),
-            format!("{}/api/projects", base),
-        ];
+        let auth = self.auth_header();
+        // 1) Get all projects
+        let projects_url = format!("{}/api/projects", base);
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "GET",
+            &projects_url,
+            &[("Authorization", auth.as_str()), ("Accept", "application/json")],
+            None,
+        );
+        let resp = self
+            .client
+            .get(&projects_url)
+            .header("Authorization", auth.clone())
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", projects_url, e))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .map_err(|e| format!("read {} failed: {}", projects_url, e))?;
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("List projects failed: HTTP {} - {}", status, text));
+        }
+        let v: Value =
+            serde_json::from_str(&text).map_err(|e| format!("parse projects failed: {}", e))?;
+        let mut project_ids: Vec<String> = Vec::new();
+        if let Some(arr) = v.as_array() {
+            for p in arr {
+                if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
+                    project_ids.push(id.to_string());
+                }
+            }
+        } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+            for p in items {
+                if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
+                    project_ids.push(id.to_string());
+                }
+            }
+        } else if let Some(projects) = v.get("projects").and_then(|x| x.as_array()) {
+            for p in projects {
+                if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
+                    project_ids.push(id.to_string());
+                }
+            }
+        }
+        // 2) For each project, fetch its boards
         let mut boards: Vec<PlankaBoard> = Vec::new();
-        for url in try_urls {
-            let auth = self.auth_header();
+        for pid in project_ids {
+            let url = format!("{}/api/projects/{}/boards", base, pid);
             #[cfg(debug_assertions)]
-            log_http_request("GET", &url, &[("Authorization", auth.as_str())], None);
-            let resp = self.client
+            log_http_request(
+                "GET",
+                &url,
+                &[("Authorization", auth.as_str()), ("Accept", "application/json")],
+                None,
+            );
+            let resp = self
+                .client
                 .get(&url)
-                .header("Authorization", auth)
+                .header("Authorization", auth.clone())
+                .header("Accept", "application/json")
                 .send()
                 .map_err(|e| format!("GET {} failed: {}", url, e))?;
             let status = resp.status();
@@ -209,49 +261,28 @@ impl PlankaClient {
                 continue;
             }
             let v: Value = serde_json::from_str(&text)
-                .map_err(|e| format!("parse {} failed: {}", url, e))?;
-            // case 1: array of boards
+                .map_err(|e| format!("parse boards failed: {}", e))?;
             if let Some(arr) = v.as_array() {
                 for b in arr {
-                    if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
-                        let name = b.get("name").and_then(|x| x.as_str())
-                            .or_else(|| b.get("title").and_then(|x| x.as_str()))
-                            .unwrap_or("");
-                        if !name.is_empty() {
-                            boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
-                        }
+                    if let (Some(id), Some(name)) = (
+                        b.get("id").and_then(|x| x.as_str()),
+                        b.get("name").and_then(|x| x.as_str())
+                            .or_else(|| b.get("title").and_then(|x| x.as_str())),
+                    ) {
+                        boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
                     }
                 }
-            // case 2: object with items[]
             } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
                 for b in items {
-                    if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
-                        let name = b.get("name").and_then(|x| x.as_str())
-                            .or_else(|| b.get("title").and_then(|x| x.as_str()))
-                            .unwrap_or("");
-                        if !name.is_empty() {
-                            boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
-                        }
-                    }
-                }
-            // case 3: projects[].boards[]
-            } else if let Some(projects) = v.get("projects").and_then(|x| x.as_array()) {
-                for p in projects {
-                    if let Some(boards_arr) = p.get("boards").and_then(|x| x.as_array()) {
-                        for b in boards_arr {
-                            if let Some(id) = b.get("id").and_then(|x| x.as_str()) {
-                                let name = b.get("name").and_then(|x| x.as_str())
-                                    .or_else(|| b.get("title").and_then(|x| x.as_str()))
-                                    .unwrap_or("");
-                                if !name.is_empty() {
-                                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
-                                }
-                            }
-                        }
+                    if let (Some(id), Some(name)) = (
+                        b.get("id").and_then(|x| x.as_str()),
+                        b.get("name").and_then(|x| x.as_str())
+                            .or_else(|| b.get("title").and_then(|x| x.as_str())),
+                    ) {
+                        boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
                     }
                 }
             }
-            if !boards.is_empty() { break; }
         }
         Ok(boards)
     }
@@ -271,10 +302,11 @@ impl PlankaClient {
         for url in candidates {
             let auth = self.auth_header();
             #[cfg(debug_assertions)]
-            log_http_request("GET", &url, &[("Authorization", auth.as_str())], None);
+            log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
             let resp = self.client
                 .get(&url)
                 .header("Authorization", auth)
+                .header("Accept", "application/json")
                 .send()
                 .map_err(|e| format!("GET {} failed: {}", url, e))?;
             let status = resp.status();
@@ -354,13 +386,14 @@ impl PlankaClient {
             log_http_request(
                 "POST",
                 &url,
-                &[("Authorization", auth.as_str()), ("Content-Type", "application/json")],
+                &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")],
                 Some(&preview.to_string()),
             );
         }
         let resp = self.client
             .post(&url)
             .header("Authorization", auth)
+            .header("Accept", "application/json")
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
@@ -391,12 +424,13 @@ impl PlankaClient {
         log_http_request(
             "PATCH",
             &url,
-            &[("Authorization", auth.as_str()), ("Content-Type", "application/json")],
+            &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")],
             Some(&body.to_string()),
         );
         let resp = self.client
             .patch(&url)
             .header("Authorization", auth)
+            .header("Accept", "application/json")
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
@@ -448,12 +482,13 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
         log_http_request(
             "POST",
             &url,
-            &[("Content-Type", "application/json")],
+            &[("Accept", "application/json"), ("Content-Type", "application/json")],
             Some(&preview),
         );
     }
     let res = client
         .post(&url)
+        .header("Accept", "application/json")
         .header(CONTENT_TYPE, "application/json")
         .json(&LoginReq {
             email_or_username,
