@@ -76,7 +76,7 @@ fn log_file_path() -> PathBuf {
                 .map(|p| p.join(".config"))
                 .unwrap_or_else(|| PathBuf::from("."))
         });
-    let dir = base.join("RustyTodos");
+    let dir = base.join("Planky");
     create_dir_all(&dir).ok();
     dir.join("planka_debug.log")
 }
@@ -122,7 +122,7 @@ pub fn config_path() -> PathBuf {
                 .map(|p| p.join(".config"))
                 .unwrap_or_else(|| PathBuf::from("."))
         });
-    let dir = base.join("RustyTodos");
+    let dir = base.join("Planky");
     create_dir_all(&dir).ok();
     dir.join("planka.json")
 }

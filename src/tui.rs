@@ -265,9 +265,9 @@ fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
     let mut done: Vec<&crate::todo::Todo> = Vec::new();
 
     for t in base {
-        let in_doing = doing_id
+        let in_doingPlankyd
             .map(|id| t.planka_list_id.as_deref() == Some(id))
-            .unwrap_or(false);
+            .unwrap_Planky
         let in_done = done_id
             .map(|id| t.planka_list_id.as_deref() == Some(id))
             .unwrap_or(false);

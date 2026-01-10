@@ -1,16 +1,16 @@
-# RustyTodos™ 🦀 - A Modern TUI Todo App
+# Planky™ 🦀 - A Modern TUI Todo App
 
-RustyTodos™ is a fast, lightweight, and interactive terminal Todo app built in Rust.  
+Planky™ is a fast, lightweight, and interactive terminal Todo app built in Rust.  
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
  
 ## Trademark Notice
-The names “Rusty-Suite”, “RustyTodos”, “RustyBoot”, and “Rusty-Checker” are part of this project’s identity.  
+The names “Rusty-Suite”, “Planky”, “RustyBoot”, and “Rusty-Checker” are part of this project’s identity.  
 See [TRADEMARK.md](TRADEMARK.md) for details.
 
-**RustyTodos™** is a fast, lightweight, and interactive terminal Todo app built in Rust.  
+**Planky™** is a fast, lightweight, and interactive terminal Todo app built in Rust.  
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
 
-![DEMO FOR MY APP](https://raw.githubusercontent.com/KushalMeghani1644/RustyTodos/0bed35d4fc2228ed3571e4c06aeb2edfda36e5f9/media/RustyTodos_demo.gif)
+![DEMO FOR MY APP](https://raw.githubusercontent.com/KushalMeghani1644/Planky/0bed35d4fc2228ed3571e4c06aeb2edfda36e5f9/media/Planky_demo.gif)
 
 ## Features
 
@@ -31,16 +31,16 @@ Manage your tasks visually with an intuitive TUI—add, list, mark as done, and 
 
 ## Download
 
-Get the latest release from the [Releases page](https://github.com/KushalMeghani1644/RustyTodos/releases).
+Get the latest release from the [Releases page](https://github.com/KushalMeghani1644/Planky/releases).
 
 | Platform   | Download                                              |
 |------------|-------------------------------------------------------|
 <<<<<<< HEAD
-| Linux      | `rustytodos-v2.1.3.tar.gz`                      |
-| Windows    | `rustytodos-v2.1.3(windows).zip`                       |
+| Linux      | `Planky-v2.1.3.tar.gz`                      |
+| Windows    | `Planky-v2.1.3(windows).zip`                       |
 =======
-| Linux      | `rustytodos-v2.1.1.tar.gz`                      |
-| Windows    | `rustytodos-v2.1.1(windows).zip`                       |
+| Linux      | `Planky-v2.1.1.tar.gz`                      |
+| Windows    | `Planky-v2.1.1(windows).zip`                       |
 
 ---
 
@@ -53,17 +53,17 @@ Get the latest release from the [Releases page](https://github.com/KushalMeghani
 ```bash
 # For Linux
 <<<<<<< HEAD
-tar -xzf rustytodos-v2.1.3-linux.tar.gz
+tar -xzf Planky-v2.1.3-linux.tar.gz
 =======
-tar -xzf rustytodos-v2.1.1-linux.tar.gz
+tar -xzf Planky-v2.1.1-linux.tar.gz
 >>>>>>> c931762491b113cfb94339e1ddbefe0f3d1ea14e
 
 # For Windows
 # Extract using your preferred archive manager (e.g., 7-Zip)
 
 # Run
-./rustytodos    # Linux
-rustytodos.exe  # Windows
+./Planky    # Linux
+Planky.exe  # Windows
 ```
 
 ---
@@ -80,7 +80,7 @@ rustytodos.exe  # Windows
 
 ## Smart Date & Time Parsing
 
-RustyTodos features an intelligent date parser that understands natural language! No need to remember complex date formats—just type what feels natural.
+Planky features an intelligent date parser that understands natural language! No need to remember complex date formats—just type what feels natural.
 
 ### Task Status Colors
 - **Green**: Completed tasks (regardless of due date)
@@ -176,24 +176,24 @@ year, next year        # Next year (365 days from now)
 ### Steps
 ```bash
 # Clone the repository
-git clone https://github.com/Kushal_Meghani1644/RustyTodos.git
-cd rustytodos
+git clone https://github.com/Kushal_Meghani1644/Planky.git
+cd Planky
 
 # Build and run
 cargo run
 
 # Or build release binary
 cargo build --release
-# Binary will be in target/release/rustytodos
+# Binary will be in target/release/Planky
 ```
 
 ---
 
 ## Configuration
 
-RustyTodos stores your todos in a JSON file:
-- **Linux/macOS**: `~/.local/share/rustytodos/todos.json`
-- **Windows**: `%APPDATA%/rustytodos/todos.json`
+Planky stores your todos in a JSON file:
+- **Linux/macOS**: `~/.local/share/Planky/todos.json`
+- **Windows**: `%APPDATA%/Planky/todos.json`
 
 The file is created automatically on first run.
 
@@ -213,7 +213,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL3 License - see the [LICENSE](LICENSE) file for details.
 
 ---
 

@@ -33,14 +33,14 @@ pub fn start_daemon() -> Result<(), Box<dyn std::error::Error>> {
                         #[cfg(target_os = "windows")]
                         {
                             notify(
-                                "RustyTodos",
+                                "Planky",
                                 &format!("\"{}\" is due today! Don't forget!", todo.description),
                             );
                         }
                         #[cfg(target_os = "macos")]
                         {
                             send_notification(
-                                "RustyTodos",
+                                "Planky",
                                 None,
                                 &format!("\"{}\" is due today! Don't forget!", todo.description),
                                 None,
