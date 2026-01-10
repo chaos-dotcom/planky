@@ -224,25 +224,54 @@ where
 }
 
 fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
-    if app.search_query.is_empty() {
-        app.todos
-            .iter()
-            .filter(|t| t.project == app.current_project)
-            .collect()
-    } else {
-        let q = app.search_query.to_lowercase();
-        app.todos
-            .iter()
-            .filter(|t| t.project == app.current_project)
-            .filter(|t| {
+    let base = app
+        .todos
+        .iter()
+        .filter(|t| t.project == app.current_project)
+        .filter(|t| {
+            if app.search_query.is_empty() {
+                true
+            } else {
+                let q = app.search_query.to_lowercase();
                 t.description.to_lowercase().contains(&q)
                     || t.due_date
                         .as_ref()
                         .map(|d| d.to_lowercase().contains(&q))
                         .unwrap_or(false)
-            })
-            .collect()
+            }
+        });
+
+    let doing_id = app
+        .planka_lists_by_board
+        .get(&app.current_project)
+        .map(|l| l.doing_list_id.as_str());
+    let done_id = app
+        .planka_lists_by_board
+        .get(&app.current_project)
+        .map(|l| l.done_list_id.as_str());
+
+    let mut doing: Vec<&crate::todo::Todo> = Vec::new();
+    let mut todo: Vec<&crate::todo::Todo> = Vec::new();
+    let mut done: Vec<&crate::todo::Todo> = Vec::new();
+
+    for t in base {
+        let in_doing = doing_id
+            .map(|id| t.planka_list_id.as_deref() == Some(id))
+            .unwrap_or(false);
+        let in_done = done_id
+            .map(|id| t.planka_list_id.as_deref() == Some(id))
+            .unwrap_or(false);
+
+        if !t.done && in_doing {
+            doing.push(t);
+        } else if t.done || in_done {
+            done.push(t);
+        } else {
+            todo.push(t);
+        }
     }
+
+    doing.into_iter().chain(todo).chain(done).collect()
 }
 
 fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
