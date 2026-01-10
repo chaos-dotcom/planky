@@ -8,6 +8,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+use std::time::Duration;
 use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -15,6 +18,25 @@ pub enum PlankaSetupStep {
     Url,
     Username,
     Password,
+}
+#[derive(Serialize, Deserialize, Clone)]
+pub enum PendingOpKind { Create, Move, Update, Delete }
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PendingOp {
+    pub kind: PendingOpKind,
+    pub project: String,
+    pub card_id: Option<String>,
+    pub list_id: Option<String>,
+    pub name: Option<String>,
+    pub due: Option<String>,
+    pub ts: i64,
+}
+
+#[derive(Clone, Debug)]
+pub enum Delta {
+    Upsert { project: String, id: String, name: String, due: Option<String>, done: bool },
+    // Delete could be added later when we compute removals in the poller
 }
 fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
 fn default_current_project() -> String { "Inbox".to_string() }
@@ -78,6 +100,10 @@ pub struct App {
     pub input_planka: String,
     #[serde(skip)]
     pub planka_setup: Option<PlankaSetupStep>,
+    #[serde(skip)]
+    pub pending_ops: Vec<PendingOp>,
+    #[serde(skip)]
+    pub inbound_rx: Option<Receiver<Delta>>,
 }
 
 impl Default for InputMode {
@@ -135,6 +161,211 @@ impl App {
             planka_boards: Vec::new(),
             input_planka: String::new(),
             planka_setup: None,
+            pending_ops: Self::load_pending_ops(),
+            inbound_rx: None,
+        }
+    }
+
+    fn pending_ops_path() -> PathBuf {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|p| p.join(".config"))
+                    .unwrap_or_else(|| PathBuf::from("."))
+            });
+        let dir = base.join("RustyTodos");
+        std::fs::create_dir_all(&dir).ok();
+        dir.join("pending_ops.json")
+    }
+
+    fn save_pending_ops(&self) {
+        let path = Self::pending_ops_path();
+        if let Ok(file) = OpenOptions::new().create(true).write(true).truncate(true).open(path) {
+            let _ = serde_json::to_writer(BufWriter::new(file), &self.pending_ops);
+        }
+    }
+
+    fn load_pending_ops() -> Vec<PendingOp> {
+        let path = Self::pending_ops_path();
+        if let Ok(file) = File::open(path) {
+            let reader = BufReader::new(file);
+            serde_json::from_reader(reader).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn enqueue_op(&mut self, op: PendingOp) {
+        self.pending_ops.push(op);
+        self.save_pending_ops();
+    }
+
+    pub fn pending_ops_len(&self) -> usize {
+        self.pending_ops.len()
+    }
+
+    pub fn start_background_sync(&mut self) {
+        let (tx, rx) = mpsc::channel::<Delta>();
+        self.inbound_rx = Some(rx);
+        thread::spawn(move || {
+            loop {
+                // Load cfg fresh each tick to allow login during runtime
+                let cfg = planka::load_config();
+                if let Some(cfg) = cfg {
+                    if let Ok((client, _)) = PlankaClient::from_config(cfg) {
+                        if let Ok(boards) = client.fetch_boards() {
+                            for b in boards {
+                                if let Ok(lists) = client.resolve_lists(&b.name) {
+                                    // todo + doing as not-done
+                                    if let Ok(cards) = client.fetch_cards(&lists.todo_list_id) {
+                                        for c in cards {
+                                            let _ = tx.send(Delta::Upsert {
+                                                project: b.name.clone(),
+                                                id: c.id.clone(),
+                                                name: c.name.clone(),
+                                                due: c.due.clone(),
+                                                done: false,
+                                            });
+                                        }
+                                    }
+                                    if let Ok(cards) = client.fetch_cards(&lists.doing_list_id) {
+                                        for c in cards {
+                                            let _ = tx.send(Delta::Upsert {
+                                                project: b.name.clone(),
+                                                id: c.id.clone(),
+                                                name: c.name.clone(),
+                                                due: c.due.clone(),
+                                                done: false,
+                                            });
+                                        }
+                                    }
+                                    if let Ok(cards) = client.fetch_cards(&lists.done_list_id) {
+                                        for c in cards {
+                                            let _ = tx.send(Delta::Upsert {
+                                                project: b.name.clone(),
+                                                id: c.id.clone(),
+                                                name: c.name.clone(),
+                                                due: c.due.clone(),
+                                                done: true,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_secs(15));
+            }
+        });
+    }
+
+    pub fn apply_delta(&mut self, d: Delta) {
+        match d {
+            Delta::Upsert { project, id, name, due, done } => {
+                // Skip overwriting local dirty items
+                if let Some(t) = self.todos.iter_mut().find(|t| t.project == project && t.planka_card_id.as_deref() == Some(id.as_str())) {
+                    if t.sync_dirty { return; }
+                    t.description = name;
+                    t.done = done;
+                    t.due_date = due.as_deref().and_then(|s| format_planka_due(s));
+                } else {
+                    self.todos.push(Todo {
+                        description: name,
+                        done,
+                        due_date: due.as_deref().and_then(|s| format_planka_due(s)),
+                        created_date: Local::now().format("%Y-%m-%d").to_string(),
+                        project,
+                        planka_card_id: Some(id),
+                        planka_list_id: None,
+                        planka_board_id: None,
+                        sync_dirty: false,
+                    });
+                }
+            }
+        }
+    }
+
+    pub fn process_pending_ops_tick(&mut self) {
+        if self.pending_ops.is_empty() {
+            return;
+        }
+        let client = match self.ensure_planka_client() {
+            Ok(c) => c,
+            Err(_) => return, // keep ops queued
+        };
+        // Work on a copy to allow removal while iterating
+        let ops = self.pending_ops.clone();
+        let mut any_removed = false;
+        for op in ops {
+            match op.kind {
+                PendingOpKind::Create => {
+                    // Resolve lists for the project
+                    if let Ok(lists) = client.resolve_lists(&op.project) {
+                        if let Some(name) = op.name.clone() {
+                            let due = op.due.as_deref();
+                            if let Ok(cid) = client.create_card(&lists.todo_list_id, &name, due) {
+                                // Update the first matching local todo without card id
+                                if let Some(t) = self.todos.iter_mut().find(|t| t.project == op.project && t.planka_card_id.is_none() && t.description == name) {
+                                    t.planka_card_id = Some(cid);
+                                    t.planka_list_id = Some(lists.todo_list_id.clone());
+                                    t.planka_board_id = Some(lists.board_id.clone());
+                                    t.sync_dirty = false;
+                                }
+                                // Remove op
+                                if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
+                                    self.pending_ops.remove(pos);
+                                    any_removed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                PendingOpKind::Move => {
+                    if let (Some(ref cid), Some(ref lid)) = (op.card_id.as_ref(), op.list_id.as_ref()) {
+                        if client.move_card(cid, lid).is_ok() {
+                            if let Some(t) = self.todos.iter_mut().find(|t| t.planka_card_id.as_deref() == Some(cid.as_str())) {
+                                t.planka_list_id = Some(lid.clone());
+                                t.sync_dirty = false;
+                            }
+                            if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
+                                self.pending_ops.remove(pos);
+                                any_removed = true;
+                            }
+                        }
+                    }
+                }
+                PendingOpKind::Delete => {
+                    if let Some(ref cid) = op.card_id {
+                        if client.delete_card(cid).is_ok() {
+                            if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
+                                self.pending_ops.remove(pos);
+                                any_removed = true;
+                            }
+                        }
+                    }
+                }
+                PendingOpKind::Update => {
+                    if let Some(ref cid) = op.card_id {
+                        let _ = client.update_card(cid, op.name.as_deref(), op.due.as_deref());
+                        if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
+                            self.pending_ops.remove(pos);
+                            any_removed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if any_removed { self.save_pending_ops(); }
+    }
+
+    pub fn drain_inbound(&mut self) {
+        if let Some(rx) = self.inbound_rx.as_ref() {
+            while let Ok(d) = rx.try_recv() {
+                self.apply_delta(d);
+            }
         }
     }
 
@@ -468,22 +699,22 @@ impl App {
             planka_board_id: None,
         };
         if let Ok(client) = self.ensure_planka_client() {
-            let lists = if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
-                l
+            let lists_opt = if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
+                Some(l)
             } else {
                 match client.resolve_lists(&self.current_project) {
                     Ok(l) => {
                         self.planka_lists_by_board.insert(self.current_project.clone(), l.clone());
                         self.planka_lists = Some(l.clone());
-                        l
+                        Some(l)
                     }
                     Err(e) => {
                         self.error_message = Some(e);
-                        return Ok(());
+                        None
                     }
                 }
             };
-            {
+            if let Some(lists) = lists_opt {
                 match client.create_card(&lists.todo_list_id, &todo.description, due_date_str.as_deref()) {
                     Ok(card_id) => {
                         todo.planka_card_id = Some(card_id);
@@ -492,9 +723,44 @@ impl App {
                     }
                     Err(e) => {
                         self.error_message = Some(format!("Planka create card failed: {}", e));
+                        // queue create
+                        todo.sync_dirty = true;
+                        self.enqueue_op(PendingOp {
+                            kind: PendingOpKind::Create,
+                            project: self.current_project.clone(),
+                            card_id: None,
+                            list_id: None,
+                            name: Some(self.input_description.clone()),
+                            due: due_date_str.clone(),
+                            ts: Local::now().timestamp(),
+                        });
                     }
                 }
+            } else {
+                // no lists: queue create for later
+                todo.sync_dirty = true;
+                self.enqueue_op(PendingOp {
+                    kind: PendingOpKind::Create,
+                    project: self.current_project.clone(),
+                    card_id: None,
+                    list_id: None,
+                    name: Some(self.input_description.clone()),
+                    due: due_date_str.clone(),
+                    ts: Local::now().timestamp(),
+                });
             }
+        } else {
+            // no client: queue create
+            todo.sync_dirty = true;
+            self.enqueue_op(PendingOp {
+                kind: PendingOpKind::Create,
+                project: self.current_project.clone(),
+                card_id: None,
+                list_id: None,
+                name: Some(self.input_description.clone()),
+                due: due_date_str.clone(),
+                ts: Local::now().timestamp(),
+            });
         }
         self.todos.push(todo);
 
@@ -517,6 +783,15 @@ impl App {
             if let Ok(client) = self.ensure_planka_client() {
                 if let Err(e) = client.delete_card(cid) {
                     self.error_message = Some(format!("Planka delete failed: {}", e));
+                    self.enqueue_op(PendingOp {
+                        kind: PendingOpKind::Delete,
+                        project: self.current_project.clone(),
+                        card_id: Some(cid.clone()),
+                        list_id: None,
+                        name: None,
+                        due: None,
+                        ts: Local::now().timestamp(),
+                    });
                 }
             } else if self.error_message.is_none() {
                 // ensure_planka_client sets error_message on failure
@@ -559,6 +834,20 @@ impl App {
                     let target = if new_done { &lists.done_list_id } else { &lists.todo_list_id };
                     if let Err(e) = client.move_card(card_id, target) {
                         self.error_message = Some(format!("Planka move to Done failed: {}", e));
+                        if let Some(ref card_id) = card_id_opt {
+                            self.enqueue_op(PendingOp {
+                                kind: PendingOpKind::Move,
+                                project: self.current_project.clone(),
+                                card_id: Some(card_id.clone()),
+                                list_id: Some(target.clone()),
+                                name: None,
+                                due: None,
+                                ts: Local::now().timestamp(),
+                            });
+                        }
+                        if let Some(todo) = self.todos.get_mut(idx) {
+                            todo.sync_dirty = true;
+                        }
                     } else {
                         if let Some(todo) = self.todos.get_mut(idx) {
                             todo.planka_list_id = Some(target.clone());

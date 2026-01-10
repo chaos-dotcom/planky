@@ -17,6 +17,8 @@ pub struct Todo {
     pub planka_list_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub planka_board_id: Option<String>,
+    #[serde(skip)]
+    pub sync_dirty: bool,
 }
 
 impl Todo {
@@ -30,6 +32,7 @@ impl Todo {
             planka_card_id: None,
             planka_list_id: None,
             planka_board_id: None,
+            sync_dirty: false,
         }
     }
 }

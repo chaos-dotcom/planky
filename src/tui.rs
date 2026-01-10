@@ -23,6 +23,9 @@ where
     std::io::Error: From<<B as Backend>::Error>,
 {
     loop {
+        // process inbound updates and retry queued outbound ops
+        app.drain_inbound();
+        app.process_pending_ops_tick();
         terminal.draw(|f| ui(f, app))?;
 
         if crossterm::event::poll(Duration::from_millis(100))? {
@@ -258,7 +261,11 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         )
         .split(size);
 
-    let title_text = format!("🌟 RustyTodos — {} 🌟", app.current_project);
+    let title_text = if app.pending_ops_len() > 0 {
+        format!("🌟 RustyTodos — {} 🌟 ⇅{}", app.current_project, app.pending_ops_len())
+    } else {
+        format!("🌟 RustyTodos — {} 🌟", app.current_project)
+    };
     let title = Paragraph::new(Line::from(Span::styled(
         title_text,
         Style::default().add_modifier(Modifier::BOLD),

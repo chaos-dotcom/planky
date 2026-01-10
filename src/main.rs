@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load app state or start fresh
     let mut app = App::load_from_file(&data_path);
+    app.start_background_sync();
 
     // Run your TUI event loop (this should block until exit)
     let res = tui::run_app(&mut terminal, &mut app);
