@@ -2,8 +2,12 @@ use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value, Map};
-use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Write as IoWrite};
+use std::fs::{create_dir_all, File};
+#[cfg(debug_assertions)]
+use std::fs::OpenOptions;
+use std::io::{BufReader, BufWriter};
+#[cfg(debug_assertions)]
+use std::io::Write as IoWrite;
 use std::path::PathBuf;
 
 #[cfg(debug_assertions)]

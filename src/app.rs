@@ -8,7 +8,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard};
@@ -327,7 +327,7 @@ impl App {
                     if let (Some(ref cid), Some(ref lid)) = (op.card_id.as_ref(), op.list_id.as_ref()) {
                         if client.move_card(cid, lid).is_ok() {
                             if let Some(t) = self.todos.iter_mut().find(|t| t.planka_card_id.as_deref() == Some(cid.as_str())) {
-                                t.planka_list_id = Some(lid.clone());
+                                t.planka_list_id = Some(lid.to_string());
                                 t.sync_dirty = false;
                             }
                             if let Some(pos) = self.pending_ops.iter().position(|p| p.ts == op.ts) {
@@ -362,11 +362,12 @@ impl App {
     }
 
     pub fn drain_inbound(&mut self) {
-        if let Some(rx) = self.inbound_rx.as_ref() {
-            while let Ok(d) = rx.try_recv() {
-                self.apply_delta(d);
-            }
+        let Some(rx) = self.inbound_rx.take() else { return; };
+        let mut rx = rx;
+        while let Ok(d) = rx.try_recv() {
+            self.apply_delta(d);
         }
+        self.inbound_rx = Some(rx);
     }
 
     pub fn ensure_planka_client(&mut self) -> Result<PlankaClient, String> {
@@ -457,6 +458,7 @@ impl App {
                                         Some(lists.todo_list_id.clone())
                                     },
                                     planka_board_id: Some(lists.board_id.clone()),
+                                    sync_dirty: false,
                                 });
                             }
                         }
@@ -561,6 +563,7 @@ impl App {
                         planka_card_id: Some(rcard.id.clone()),
                         planka_list_id: Some(rlist.clone()),
                         planka_board_id: Some(lists.board_id.clone()),
+                        sync_dirty: false,
                     });
                 }
             }
@@ -697,6 +700,7 @@ impl App {
             planka_card_id: None,
             planka_list_id: None,
             planka_board_id: None,
+            sync_dirty: false,
         };
         if let Ok(client) = self.ensure_planka_client() {
             let lists_opt = if let Some(l) = self.planka_lists_by_board.get(&self.current_project).cloned() {
