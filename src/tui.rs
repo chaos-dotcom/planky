@@ -5,7 +5,7 @@ use chrono::{
     Datelike, Duration as Dur, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike,
     Weekday,
 };
-use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     Terminal,
     backend::Backend,
@@ -15,6 +15,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 use std::{io, time::Duration};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
 where
@@ -54,9 +56,50 @@ where
                                 app.selected -= 1;
                             }
                         }
+                        KeyCode::Char('y') => {
+                            let list = filtered_todos(app);
+                            if let Some(todo) = list.get(app.selected) {
+                                if let Err(e) = copy_to_clipboard(&todo.description) {
+                                    app.error_message = Some(format!("Copy failed: {}", e));
+                                } else {
+                                    app.error_message = Some("Copied task to clipboard".to_string());
+                                }
+                            }
+                        }
+                        KeyCode::Char('p') => {
+                            match paste_from_clipboard() {
+                                Ok(mut text) => {
+                                    // trim trailing newlines from clipboard content
+                                    while text.ends_with('\n') || text.ends_with('\r') {
+                                        text.pop();
+                                    }
+                                    app.input_description = text;
+                                    app.input_mode = InputMode::EditingDescription;
+                                    app.error_message = None;
+                                }
+                                Err(e) => {
+                                    app.error_message = Some(format!("Paste failed: {}", e));
+                                }
+                            }
+                        }
                         _ => {}
                     },
-                    InputMode::EditingDescription => match key.code {
+                    InputMode::EditingDescription => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+                        {
+                            match paste_from_clipboard() {
+                                Ok(mut text) => {
+                                    while text.ends_with('\n') || text.ends_with('\r') {
+                                        text.pop();
+                                    }
+                                    app.input_description.push_str(&text);
+                                }
+                                Err(e) => app.error_message = Some(format!("Paste failed: {}", e)),
+                            }
+                            continue;
+                        }
+                        match key.code {
                         KeyCode::Enter => {
                             app.input_mode = InputMode::EditingDueDate;
                         }
@@ -175,7 +218,12 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::styled("/", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to search, "),
         Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to quit."),
+        Span::raw(" to quit"),
+        Span::raw(", "),
+        Span::styled("y", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to copy, "),
+        Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to paste"),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[1]);
@@ -646,4 +694,68 @@ fn validate_not_past(s: &str) -> Result<String, String> {
     }
 
     Err("Failed to parse due date".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start pbcopy: {}", e))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("Failed to write to pbcopy: {}", e))?;
+    }
+    let status = child.wait().map_err(|e| format!("pbcopy wait failed: {}", e))?;
+    if status.success() { Ok(()) } else { Err("pbcopy failed".into()) }
+}
+
+#[cfg(target_os = "linux")]
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    let mut child = Command::new("wl-copy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start wl-copy: {}", e))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("Failed to write to wl-copy: {}", e))?;
+    }
+    let status = child.wait().map_err(|e| format!("wl-copy wait failed: {}", e))?;
+    if status.success() { Ok(()) } else { Err("wl-copy failed".into()) }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn copy_to_clipboard(_text: &str) -> Result<(), String> {
+    Err("Clipboard copy not supported on this OS".into())
+}
+
+#[cfg(target_os = "macos")]
+fn paste_from_clipboard() -> Result<String, String> {
+    let out = Command::new("pbpaste")
+        .output()
+        .map_err(|e| format!("Failed to start pbpaste: {}", e))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err("pbpaste failed".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn paste_from_clipboard() -> Result<String, String> {
+    let out = Command::new("wl-paste")
+        .output()
+        .map_err(|e| format!("Failed to start wl-paste: {}", e))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err("wl-paste failed".into())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn paste_from_clipboard() -> Result<String, String> {
+    Err("Clipboard paste not supported on this OS".into())
 }
