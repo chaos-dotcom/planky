@@ -13,7 +13,7 @@ Manage your tasks visually with an intuitive TUI—add, list, mark as done, and 
 - [x] Interactive terminal UI (TUI)
 - [x] Planka backend integration (boards treated as “projects”)
 - [x] Near‑realtime background sync (pull) + offline‑safe outbound queue (push)
-- [x] Add, edit (Enter), delete, copy/paste description (y/p)
+- [x] Add, edit (e), delete, copy/paste description (y/p)
 - [x] Mark Doing (k) and Done (m); Doing highlighted in Cyan, Done in Green
 - [x] Natural language due dates (relative, weekdays, absolute, combos)
 - [x] Search (?), project switch ([ and ]), set project (l), login (L), sync (S)
@@ -34,7 +34,7 @@ Manage your tasks visually with an intuitive TUI—add, list, mark as done, and 
 
 - Add: a → description → Enter → due date → Enter
 - Navigate: ↑/↓
-- Edit selected: Enter
+- Edit selected: e
 - Mark Doing: k
 - Mark Done: m
 - Delete: d

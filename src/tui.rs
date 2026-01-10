@@ -43,7 +43,7 @@ where
                             app.input_due_date.clear();
                             app.error_message = None;
                         }
-                        KeyCode::Enter => {
+                        KeyCode::Char('e') => {
                             app.begin_edit_selected();
                         }
                         KeyCode::Char('d') => app.delete_todo(),
@@ -320,7 +320,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Line::from(vec![
             Span::raw("Press "),
             Span::styled("a", b), Span::raw(" add, "),
-            Span::styled("Enter", b), Span::raw(" edit, "),
+            Span::styled("e", b), Span::raw(" edit, "),
             Span::styled("m", b), Span::raw(" done, "),
             Span::styled("k", b), Span::raw(" doing, "),
             Span::styled("d", b), Span::raw(" delete, "),
