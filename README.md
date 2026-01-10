@@ -1,22 +1,28 @@
 # Planky 🦀 - A Modern TUI Todo App
 
-Planky™ is a fast, lightweight, and interactive terminal Todo app built in Rust.  
+Planky™ is a fast, lightweight, and interactive terminal Todo app and Planka client built in Rust.  
+It keeps your todos in sync with your Planka boards (boards = projects), with near‑realtime updates.
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
  
 ## Features
 
-- [x] Interactive terminal UI (TUI)  
-- [x] Add new todos with description & due date  
-- [x] **Smart natural language date parsing**  
-- [x] **Color-coded task status (overdue, pending, completed)**  
-- [x] View todos in a scrollable list  
-- [x] Mark todos as done  
-- [x] Delete todos by ID  
-- [x] Persistent storage in a JSON file  
-- [x] Cross-platform binaries (Linux & Windows)  
-- [x] Pre-built binaries for easy setup
-- [x] Cross platform notification (Linux & Windows)
-- [x] Search option to search for your todos!
+- [x] Interactive terminal UI (TUI)
+- [x] Planka backend integration (boards treated as “projects”)
+- [x] Near‑realtime background sync (pull) + offline‑safe outbound queue (push)
+- [x] Add, edit (Enter), delete, copy/paste description (y/p)
+- [x] Mark Doing (k) and Done (m); Doing highlighted in Cyan, Done in Green
+- [x] Natural language due dates (relative, weekdays, absolute, combos)
+- [x] Search (?), project switch ([ and ]), set project (l), login (L), sync (S)
+- [x] Persistent storage and config in XDG config dir
+- [x] Detailed HTTP debug logs in debug builds
+
+## Planka Integration
+- Boards are treated as “projects” in the UI. Use [ and ] to cycle.
+- Lists are auto‑detected (case/spacing agnostic): Todo/Doing/Done.
+- Sync:
+  - Inbound: background poller updates todos from Planka.
+  - Outbound: actions create/move/update/delete remote cards; failures are queued and retried.
+- Press L to log in (URL → username → password). Press S to sync now.
 
 ---
 
@@ -26,9 +32,8 @@ Get the latest release from the [Releases page](https://github.com/KushalMeghani
 
 | Platform   | Download                                              |
 |------------|-------------------------------------------------------|
-<<<<<<< HEAD
-| Linux      | `Planky-v2.1.3.tar.gz`                      |
-| Windows    | `Planky-v2.1.3(windows).zip`                       |
+| Linux      | `Planky-v2.1.1.tar.gz`                      |
+| Windows    | `Planky-v2.1.1(windows).zip`                       |
 =======
 | Linux      | `Planky-v2.1.1.tar.gz`                      |
 | Windows    | `Planky-v2.1.1(windows).zip`                       |
@@ -43,8 +48,8 @@ Get the latest release from the [Releases page](https://github.com/KushalMeghani
 2. Extract the archive:
 ```bash
 # For Linux
-<<<<<<< HEAD
-tar -xzf Planky-v2.1.3-linux.tar.gz
+tar -xzf Planky-v2.1.1-linux.tar.gz
+>>>>>>> c931762491b113cfb94339e1ddbefe0f3d1ea14e
 =======
 tar -xzf Planky-v2.1.1-linux.tar.gz
 >>>>>>> c931762491b113cfb94339e1ddbefe0f3d1ea14e
@@ -61,11 +66,19 @@ Planky.exe  # Windows
 
 ## TUI Interaction Guide
 
-- **Add Todo**: Press `a`, enter description, press `Enter`, enter due date, press `Enter`
-- **Navigate Todos**: Use arrow keys ↑↓ to navigate through your task list
-- **Mark as Done**: Select a todo and press `m`
-- **Delete Todo**: Select a todo and press `d`
-- **Quit**: Press `q`
+- Add: a → description → Enter → due date → Enter
+- Navigate: ↑/↓
+- Edit selected: Enter
+- Mark Doing: k
+- Mark Done: m
+- Delete: d
+- Copy/Paste description: y / p
+- Search: ?
+- Prev/Next project: [ / ]
+- Set project: l
+- Planka login: L
+- Sync now: S
+- Quit: q
 
 ---
 
@@ -183,10 +196,18 @@ cargo build --release
 ## Configuration
 
 Planky stores your todos in a JSON file:
-- **Linux/macOS**: `~/.local/share/Planky/todos.json`
-- **Windows**: `%APPDATA%/Planky/todos.json`
+- Todos: `~/.config/Planky/todos.json` (uses XDG_CONFIG_HOME if set)
+- Planka config: `~/.config/Planky/planka.json`
+- Debug HTTP log (debug builds): `~/.config/Planky/planka_debug.log`
+- Pending ops (offline queue): `~/.config/Planky/pending_ops.json`
+- Windows equivalents use `%APPDATA%\Planky\...`
 
 The file is created automatically on first run.
+
+## Troubleshooting
+- Enable a debug build to capture HTTP logs and stderr traces.
+- Check `~/.config/Planky/planka_debug.log` for full request/response logs (secrets masked).
+- If an action fails offline, it will appear in the title as “⇅N” and retry automatically.
 
 ---
 
@@ -204,7 +225,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the GPL3 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL-3.0 License — see the [LICENSE](LICENSE) file for details.
 
 ---
 
