@@ -43,6 +43,9 @@ where
                             app.input_due_date.clear();
                             app.error_message = None;
                         }
+                        KeyCode::Enter => {
+                            app.begin_edit_selected();
+                        }
                         KeyCode::Char('d') => app.delete_todo(),
                         KeyCode::Char('m') => app.mark_done(),
                         KeyCode::Char('k') => {
@@ -140,12 +143,19 @@ where
                         _ => {}
                     }},
                     InputMode::EditingDueDate => match key.code {
-                        KeyCode::Enter => match app.add_todo() {
-                            Ok(_) => app.input_mode = InputMode::Normal,
-                            Err(e) => {
-                                app.error_message = Some(e);
+                        KeyCode::Enter => {
+                            if app.editing_index.is_some() {
+                                match app.save_edit() {
+                                    Ok(_) => app.input_mode = InputMode::Normal,
+                                    Err(e) => app.error_message = Some(e),
+                                }
+                            } else {
+                                match app.add_todo() {
+                                    Ok(_) => app.input_mode = InputMode::Normal,
+                                    Err(e) => app.error_message = Some(e),
+                                }
                             }
-                        },
+                        }
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
                         }
@@ -305,38 +315,28 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     .alignment(Alignment::Center);
     f.render_widget(title, chunks[0]);
 
-    let help = Paragraph::new(Line::from(vec![
-        Span::raw("Press "),
-        Span::styled("a", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to add, "),
-        Span::styled("m", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to mark done, "),
-        Span::styled("d", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to delete, "),
-        Span::styled("k", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" mark doing, "),
-        Span::styled("?", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to search, "),
-        Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to quit"),
-        Span::raw(", "),
-        Span::styled("y", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to copy, "),
-        Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to paste"),
-        Span::raw(", "),
-        Span::styled("[", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" prev, "),
-        Span::styled("]", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" next project, "),
-        Span::styled("l", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" set project"),
-        Span::raw(", "),
-        Span::styled("S", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" sync Planka, "),
-        Span::styled("L", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" Planka login"),
-    ]))
+    let bold = |s: &str| Span::styled(s, Style::default().add_modifier(Modifier::BOLD));
+    let help = Paragraph::new(vec![
+        Line::from(vec![
+            Span::raw("Press "),
+            bold("a"), Span::raw(" add, "),
+            bold("Enter"), Span::raw(" edit, "),
+            bold("m"), Span::raw(" done, "),
+            bold("k"), Span::raw(" doing, "),
+            bold("d"), Span::raw(" delete, "),
+            bold("y"), Span::raw(" copy, "),
+            bold("p"), Span::raw(" paste"),
+        ]),
+        Line::from(vec![
+            bold("?"), Span::raw(" search, "),
+            Span::styled("[", Style::default().add_modifier(Modifier::BOLD)), Span::raw(" prev, "),
+            Span::styled("]", Style::default().add_modifier(Modifier::BOLD)), Span::raw(" next project, "),
+            bold("l"), Span::raw(" set project, "),
+            bold("S"), Span::raw(" sync, "),
+            bold("L"), Span::raw(" login, "),
+            bold("q"), Span::raw(" quit"),
+        ]),
+    ])
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[1]);
 

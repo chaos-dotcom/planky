@@ -104,6 +104,8 @@ pub struct App {
     pub pending_ops: Vec<PendingOp>,
     #[serde(skip)]
     pub inbound_rx: Option<Receiver<Delta>>,
+    #[serde(skip)]
+    pub editing_index: Option<usize>,
 }
 
 impl Default for InputMode {
@@ -163,6 +165,7 @@ impl App {
             planka_setup: None,
             pending_ops: Self::load_pending_ops(),
             inbound_rx: None,
+            editing_index: None,
         }
     }
 
@@ -689,6 +692,72 @@ impl App {
                 self.input_mode = InputMode::Normal;
             }
         }
+    }
+
+    pub fn begin_edit_selected(&mut self) {
+        if let Some(idx) = self.selected_index_in_all() {
+            let t = &self.todos[idx];
+            self.input_description = t.description.clone();
+            self.input_due_date = t.due_date.clone().unwrap_or_default();
+            self.editing_index = Some(idx);
+            self.input_mode = InputMode::EditingDescription;
+            self.error_message = None;
+        }
+    }
+
+    pub fn save_edit(&mut self) -> Result<(), String> {
+        let Some(idx) = self.editing_index else { return Ok(()); };
+        if self.input_description.trim().is_empty() {
+            return Err("Description cannot be empty.".to_string());
+        }
+        let due_date_str = if self.input_due_date.trim().is_empty() {
+            None
+        } else {
+            Some(parse_due_date(&self.input_due_date)?)
+        };
+        {
+            let t = &mut self.todos[idx];
+            t.description = self.input_description.clone();
+            t.due_date = due_date_str.clone();
+        }
+        let card_id = self.todos[idx].planka_card_id.clone();
+        if let Some(cid) = card_id {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Err(e) = client.update_card(&cid, Some(&self.input_description), due_date_str.as_deref()) {
+                    self.error_message = Some(format!("Planka update failed: {}", e));
+                    if let Some(t) = self.todos.get_mut(idx) {
+                        t.sync_dirty = true;
+                    }
+                    self.enqueue_op(PendingOp {
+                        kind: PendingOpKind::Update,
+                        project: self.current_project.clone(),
+                        card_id: Some(cid),
+                        list_id: None,
+                        name: Some(self.input_description.clone()),
+                        due: due_date_str.clone(),
+                        ts: Local::now().timestamp(),
+                    });
+                }
+            } else {
+                if let Some(t) = self.todos.get_mut(idx) {
+                    t.sync_dirty = true;
+                }
+                self.enqueue_op(PendingOp {
+                    kind: PendingOpKind::Update,
+                    project: self.current_project.clone(),
+                    card_id: Some(cid),
+                    list_id: None,
+                    name: Some(self.input_description.clone()),
+                    due: due_date_str.clone(),
+                    ts: Local::now().timestamp(),
+                });
+            }
+        }
+        // clear inputs and editing state
+        self.input_description.clear();
+        self.input_due_date.clear();
+        self.editing_index = None;
+        Ok(())
     }
 
     pub fn add_todo(&mut self) -> Result<(), String> {
