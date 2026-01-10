@@ -265,9 +265,9 @@ fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
     let mut done: Vec<&crate::todo::Todo> = Vec::new();
 
     for t in base {
-        let in_doingPlankyd
+        let in_doing = doing_id
             .map(|id| t.planka_list_id.as_deref() == Some(id))
-            .unwrap_Planky
+            .unwrap_or(false);
         let in_done = done_id
             .map(|id| t.planka_list_id.as_deref() == Some(id))
             .unwrap_or(false);
@@ -304,9 +304,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .split(size);
 
     let title_text = if app.pending_ops_len() > 0 {
-        format!("🌟 RustyTodos — {} 🌟 ⇅{}", app.current_project, app.pending_ops_len())
+        format!("🌟 Planky — {} 🌟 ⇅{}", app.current_project, app.pending_ops_len())
     } else {
-        format!("🌟 RustyTodos — {} 🌟", app.current_project)
+        format!("🌟 Planky — {} 🌟", app.current_project)
     };
     let title = Paragraph::new(Line::from(Span::styled(
         title_text,

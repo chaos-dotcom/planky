@@ -175,10 +175,10 @@ impl App {
             .unwrap_or_else(|| {
                 std::env::var_os("HOME")
                     .map(PathBuf::from)
-                    .map(|p| Plankyonfig"))
+                    .map(|p| p.join(".config"))
                     .unwrap_or_else(|| PathBuf::from("."))
             });
-        let dir = base.join("RustyTodos");
+        let dir = base.join("Planky");
         std::fs::create_dir_all(&dir).ok();
         dir.join("pending_ops.json")
     }
