@@ -10,7 +10,7 @@ use notify_rust::Notification;
 use notifica::notify;
 
 #[cfg(target_os = "macos")]
-use macos_notification_sys::*;
+use mac_notification_sys::*;
 
 pub fn start_daemon() -> Result<(), Box<dyn std::error::Error>> {
     loop {

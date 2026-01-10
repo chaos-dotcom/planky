@@ -11,12 +11,15 @@ use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Span, Line},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 use std::{io, time::Duration};
 
-pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
+where
+    std::io::Error: From<<B as Backend>::Error>,
+{
     loop {
         terminal.draw(|f| ui(f, app))?;
 
@@ -135,8 +138,8 @@ fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
     }
 }
 
-fn ui<B: Backend>(f: &mut ratatui::Frame<B>, app: &App) {
-    let size = f.size();
+fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
+    let size = f.area();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -154,14 +157,14 @@ fn ui<B: Backend>(f: &mut ratatui::Frame<B>, app: &App) {
         )
         .split(size);
 
-    let title = Paragraph::new(Span::styled(
+    let title = Paragraph::new(Line::from(Span::styled(
         "🌟 RustyTodos! 🌟",
         Style::default().add_modifier(Modifier::BOLD),
-    ))
+    )))
     .alignment(Alignment::Center);
     f.render_widget(title, chunks[0]);
 
-    let help = Paragraph::new(Spans::from(vec![
+    let help = Paragraph::new(Line::from(vec![
         Span::raw("Press "),
         Span::styled("a", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to add, "),
@@ -192,7 +195,7 @@ fn ui<B: Backend>(f: &mut ratatui::Frame<B>, app: &App) {
             } else {
                 Color::Yellow
             };
-            let spans = Spans::from(vec![
+            let line = Line::from(vec![
                 Span::raw(format!("{} ", status)),
                 Span::styled(&t.description, Style::default().fg(desc_color)),
                 Span::raw(format!(
@@ -200,7 +203,7 @@ fn ui<B: Backend>(f: &mut ratatui::Frame<B>, app: &App) {
                     due_date_str, t.created_date
                 )),
             ]);
-            ListItem::new(spans)
+            ListItem::new(line)
         })
         .collect();
 
@@ -566,7 +569,7 @@ fn parse_compound_offset(
 fn try_parse_date_or_time(
     input: &str,
     today: NaiveDate,
-    now: chrono::DateTime<Local>,
+    _now: chrono::DateTime<Local>,
 ) -> Result<String, String> {
     // Try full date (YYYY-MM-DD)
     if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {

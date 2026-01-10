@@ -4,7 +4,6 @@ use crate::tui::parse_due_date;
 use chrono::Local;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::f32::consts::PI;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
