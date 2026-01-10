@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "Planky"
-version = "2.1.8"
-dependencies = [
- "chrono",
- "crossterm",
- "directories",
- "mac-notification-sys 0.6.9",
- "notifica",
- "notify-rust 4.11.7",
- "ratatui",
- "reqwest",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1917,6 +1901,22 @@ name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
+
+[[package]]
+name = "planky"
+version = "3.0.12"
+dependencies = [
+ "chrono",
+ "crossterm",
+ "directories",
+ "mac-notification-sys 0.6.9",
+ "notifica",
+ "notify-rust 4.11.7",
+ "ratatui",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "polling"
