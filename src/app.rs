@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use crate::planka::{self, PlankaClient, PlankaConfig, PlankaLists};
+use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlankaSetupStep {
@@ -64,6 +64,8 @@ pub struct App {
     #[serde(skip)]
     pub planka_lists: Option<PlankaLists>,
     #[serde(skip)]
+    pub planka_boards: Vec<PlankaBoard>,
+    #[serde(skip)]
     pub input_planka: String,
     #[serde(skip)]
     pub planka_setup: Option<PlankaSetupStep>,
@@ -96,6 +98,7 @@ impl App {
             input_project: String::new(),
             planka_config: planka::load_config(),
             planka_lists: None,
+            planka_boards: Vec::new(),
             input_planka: String::new(),
             planka_setup: None,
         }
@@ -114,6 +117,21 @@ impl App {
     pub fn sync_current_project_from_planka(&mut self) {
         match self.ensure_planka_client() {
             Ok(client) => {
+                // 1) Fetch boards and use them as “projects”
+                if let Ok(boards) = client.fetch_boards() {
+                    if !boards.is_empty() {
+                        let names: Vec<String> = boards.iter().map(|b| b.name.clone()).collect();
+                        self.planka_boards = boards;
+                        self.projects = names;
+                        if !self.projects.iter().any(|p| p == &self.current_project) {
+                            if let Some(first) = self.projects.get(0) {
+                                self.current_project = first.clone();
+                                self.selected = 0;
+                            }
+                        }
+                    }
+                }
+                // 2) Resolve lists for the current project (board name)
                 match client.resolve_lists(&self.current_project) {
                     Ok(lists) => {
                         self.planka_lists = Some(lists.clone());
@@ -178,6 +196,8 @@ impl App {
                         self.planka_config = Some(saved);
                         let _ = planka::save_config(self.planka_config.as_ref().unwrap());
                         self.error_message = Some("Planka login successful".to_string());
+                        // Populate projects from Planka boards now.
+                        self.sync_current_project_from_planka();
                     }
                     Err(e) => {
                         self.error_message = Some(format!("Planka login failed: {}", e));

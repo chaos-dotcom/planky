@@ -173,6 +173,13 @@ impl PlankaClient {
         format!("Bearer {}", self.token)
     }
 
+    pub fn fetch_boards(&self) -> Result<Vec<PlankaBoard>, String> {
+        #[cfg(debug_assertions)]
+        log_debug("fetch_boards() called (stub returns empty)");
+        // TODO: replace with real GET to list user's boards/projects.
+        Ok(vec![])
+    }
+
     // TODO: Fill with actual Planka endpoints.
     pub fn resolve_lists(&self, _board_name: &str) -> Result<PlankaLists, String> {
         #[cfg(debug_assertions)]
@@ -261,6 +268,12 @@ fn login(server_url: &str, email_or_username: &str, password: &str) -> Result<St
     #[cfg(debug_assertions)]
     log_debug("Login succeeded and token parsed");
     Ok(body.item)
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaBoard {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug)]
