@@ -41,7 +41,7 @@ pub fn start_daemon() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             send_notification(
                                 "RustyTodos",
-                                &None,
+                                None,
                                 &format!("\"{}\" is due today! Don't forget!", todo.description),
                                 None,
                             )?;

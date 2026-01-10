@@ -368,6 +368,12 @@ pub fn parse_due_date(input: &str) -> Result<String, String> {
         // "in X unit Y unit" patterns (e.g., "in 1 day 3 hours")
         ["in", num1, unit1, num2, unit2] => parse_compound_offset(num1, unit1, num2, unit2, &now),
 
+        // Date + Time (place before generic [num, unit])
+        [date_str, time_str] => parse_date_time_combo(date_str, time_str),
+
+        // Weekday + time (e.g., "friday 15:30") — also before [num, unit]
+        [day, time] if is_weekday(day) => parse_weekday_time(day, time, today),
+
         // "X unit" patterns (e.g., "3 days", "2 hours")
         [num, unit] => parse_offset(num, unit, &now),
 
@@ -377,11 +383,6 @@ pub fn parse_due_date(input: &str) -> Result<String, String> {
         // Full date or time
         [date_or_time] => try_parse_date_or_time(date_or_time, today, now),
 
-        // Date + Time
-        [date_str, time_str] => parse_date_time_combo(date_str, time_str),
-
-        // Weekday + time (e.g., "friday 15:30")
-        [day, time] if is_weekday(day) => parse_weekday_time(day, time, today),
 
         // "next/this weekday time"
         ["next", day, time] if is_weekday(day) => parse_next_weekday_time(day, time, today),
