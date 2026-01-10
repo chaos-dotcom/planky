@@ -235,8 +235,28 @@ impl PlankaClient {
                 }
             }
         }
-        // 2) For each project, fetch its boards
+        // 2) Prefer boards embedded in the projects response (included.boards)
         let mut boards: Vec<PlankaBoard> = Vec::new();
+        if let Some(included_boards) = v
+            .get("included")
+            .and_then(|i| i.get("boards"))
+            .and_then(|b| b.as_array())
+        {
+            for b in included_boards {
+                if let (Some(id), Some(name)) = (
+                    b.get("id").and_then(|x| x.as_str()),
+                    b.get("name").and_then(|x| x.as_str())
+                        .or_else(|| b.get("title").and_then(|x| x.as_str())),
+                ) {
+                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string() });
+                }
+            }
+        }
+        if !boards.is_empty() {
+            return Ok(boards);
+        }
+
+        // 3) Fallback: query boards per project (skip HTML responses)
         for pid in project_ids {
             let url = format!("{}/api/projects/{}/boards", base, pid);
             #[cfg(debug_assertions)]
@@ -258,6 +278,10 @@ impl PlankaClient {
             #[cfg(debug_assertions)]
             log_http_response(status.as_u16(), &text);
             if !status.is_success() {
+                continue;
+            }
+            // Skip HTML SPA responses
+            if text.trim_start().starts_with('<') {
                 continue;
             }
             let v: Value = serde_json::from_str(&text)
@@ -314,6 +338,10 @@ impl PlankaClient {
             #[cfg(debug_assertions)]
             log_http_response(status.as_u16(), &text);
             if !status.is_success() {
+                continue;
+            }
+            // Skip HTML SPA responses
+            if text.trim_start().starts_with('<') {
                 continue;
             }
             let v: Value = serde_json::from_str(&text)
