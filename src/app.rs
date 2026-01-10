@@ -377,7 +377,7 @@ impl App {
 
     pub fn drain_inbound(&mut self) {
         let Some(rx) = self.inbound_rx.take() else { return; };
-        let mut rx = rx;
+        let rx = rx;
         while let Ok(d) = rx.try_recv() {
             self.apply_delta(d);
         }
@@ -949,7 +949,7 @@ impl App {
     pub fn mark_doing(&mut self) {
         let Some(idx) = self.selected_index_in_all() else { return; };
         // Read needed values without holding a mutable borrow of self
-        let (card_id_opt, was_done, current_list_id) = {
+        let (card_id_opt, _was_done, current_list_id) = {
             let t = &self.todos[idx];
             (t.planka_card_id.clone(), t.done, t.planka_list_id.clone())
         };

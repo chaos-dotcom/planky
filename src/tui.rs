@@ -315,26 +315,26 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     .alignment(Alignment::Center);
     f.render_widget(title, chunks[0]);
 
-    let bold = |s: &str| Span::styled(s, Style::default().add_modifier(Modifier::BOLD));
+    let b = Style::default().add_modifier(Modifier::BOLD);
     let help = Paragraph::new(vec![
         Line::from(vec![
             Span::raw("Press "),
-            bold("a"), Span::raw(" add, "),
-            bold("Enter"), Span::raw(" edit, "),
-            bold("m"), Span::raw(" done, "),
-            bold("k"), Span::raw(" doing, "),
-            bold("d"), Span::raw(" delete, "),
-            bold("y"), Span::raw(" copy, "),
-            bold("p"), Span::raw(" paste"),
+            Span::styled("a", b), Span::raw(" add, "),
+            Span::styled("Enter", b), Span::raw(" edit, "),
+            Span::styled("m", b), Span::raw(" done, "),
+            Span::styled("k", b), Span::raw(" doing, "),
+            Span::styled("d", b), Span::raw(" delete, "),
+            Span::styled("y", b), Span::raw(" copy, "),
+            Span::styled("p", b), Span::raw(" paste"),
         ]),
         Line::from(vec![
-            bold("?"), Span::raw(" search, "),
-            Span::styled("[", Style::default().add_modifier(Modifier::BOLD)), Span::raw(" prev, "),
-            Span::styled("]", Style::default().add_modifier(Modifier::BOLD)), Span::raw(" next project, "),
-            bold("l"), Span::raw(" set project, "),
-            bold("S"), Span::raw(" sync, "),
-            bold("L"), Span::raw(" login, "),
-            bold("q"), Span::raw(" quit"),
+            Span::styled("?", b), Span::raw(" search, "),
+            Span::styled("[", b), Span::raw(" prev, "),
+            Span::styled("]", b), Span::raw(" next project, "),
+            Span::styled("l", b), Span::raw(" set project, "),
+            Span::styled("S", b), Span::raw(" sync, "),
+            Span::styled("L", b), Span::raw(" login, "),
+            Span::styled("q", b), Span::raw(" quit"),
         ]),
     ])
     .alignment(Alignment::Center);
