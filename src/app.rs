@@ -128,7 +128,11 @@ impl App {
 
     pub fn start_planka_setup(&mut self) {
         self.planka_setup = Some(PlankaSetupStep::Url);
-        self.input_planka.clear();
+        self.input_planka = self
+            .planka_config
+            .as_ref()
+            .map(|c| c.server_url.clone())
+            .unwrap_or_default();
         self.input_mode = InputMode::EditingPlanka;
         self.error_message = None;
     }
@@ -143,12 +147,28 @@ impl App {
             PlankaSetupStep::Url => {
                 cfg.server_url = self.input_planka.trim().to_string();
                 self.input_planka.clear();
+                // persist partial config so next step sees server_url
+                self.planka_config = Some(cfg.clone());
                 self.planka_setup = Some(PlankaSetupStep::Username);
+                // optional: prefill username if already present
+                if let Some(existing) = self.planka_config.as_ref() {
+                    if !existing.email_or_username.is_empty() {
+                        self.input_planka = existing.email_or_username.clone();
+                    }
+                }
             }
             PlankaSetupStep::Username => {
                 cfg.email_or_username = self.input_planka.trim().to_string();
                 self.input_planka.clear();
+                // persist partial config so next step sees server_url + username
+                self.planka_config = Some(cfg.clone());
                 self.planka_setup = Some(PlankaSetupStep::Password);
+                // optional: prefill password if already present (rare)
+                if let Some(existing) = self.planka_config.as_ref() {
+                    if !existing.password.is_empty() {
+                        self.input_planka = existing.password.clone();
+                    }
+                }
             }
             PlankaSetupStep::Password => {
                 cfg.password = self.input_planka.clone();
