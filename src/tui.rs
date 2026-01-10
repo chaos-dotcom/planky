@@ -304,9 +304,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .split(size);
 
     let title_text = if app.pending_ops_len() > 0 {
-        format!("🏳️‍⚧️ Planky — {} 🏳️‍⚧️ ⇅{}", app.current_project, app.pending_ops_len())
+        format!("🌈 Planky — {} 🌈🏴‍☠️ ⇅{}", app.current_project, app.pending_ops_len())
     } else {
-        format!("🏳️‍⚧️ Planky — {} 🏳️‍⚧️", app.current_project)
+        format!("🌈 Planky — {} 🌈", app.current_project)
     };
     let title = Paragraph::new(Line::from(Span::styled(
         title_text,
