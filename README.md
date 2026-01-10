@@ -1,4 +1,4 @@
-# Planky™ 🦀 - A Modern TUI Todo App
+# Planky 🦀 - A Modern TUI Todo App
 
 Planky™ is a fast, lightweight, and interactive terminal Todo app built in Rust.  
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
