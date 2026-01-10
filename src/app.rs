@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use crate::planka::{self, PlankaClient, PlankaConfig, PlankaLists};
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PlankaSetupStep {
+    Url,
+    Username,
+    Password,
+}
 fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
 fn default_current_project() -> String { "Inbox".to_string() }
 
@@ -25,6 +33,7 @@ pub enum InputMode {
     EditingDueDate,
     Searching,      // search mode
     EditingProject, // project name editing
+    EditingPlanka,  // Planka setup flow
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,6 +59,14 @@ pub struct App {
     pub error_message: Option<String>,
     #[serde(skip)]
     pub search_query: String, // Added for search
+    #[serde(skip)]
+    pub planka_config: Option<PlankaConfig>,
+    #[serde(skip)]
+    pub planka_lists: Option<PlankaLists>,
+    #[serde(skip)]
+    pub input_planka: String,
+    #[serde(skip)]
+    pub planka_setup: Option<PlankaSetupStep>,
 }
 
 impl Default for InputMode {
@@ -77,6 +94,78 @@ impl App {
             projects: default_projects(),
             current_project: default_current_project(),
             input_project: String::new(),
+            planka_config: planka::load_config(),
+            planka_lists: None,
+            input_planka: String::new(),
+            planka_setup: None,
+        }
+    }
+
+    pub fn ensure_planka_client(&mut self) -> Result<PlankaClient, String> {
+        let cfg = self
+            .planka_config
+            .clone()
+            .ok_or_else(|| "Planka config not set. Press 'L' to login/setup.".to_string())?;
+        let (client, new_cfg) = PlankaClient::from_config(cfg)?;
+        self.planka_config = Some(new_cfg);
+        Ok(client)
+    }
+
+    pub fn sync_current_project_from_planka(&mut self) {
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                match client.resolve_lists(&self.current_project) {
+                    Ok(lists) => {
+                        self.planka_lists = Some(lists.clone());
+                        self.error_message = Some("Synced from Planka".to_string());
+                    }
+                    Err(e) => self.error_message = Some(e),
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn start_planka_setup(&mut self) {
+        self.planka_setup = Some(PlankaSetupStep::Url);
+        self.input_planka.clear();
+        self.input_mode = InputMode::EditingPlanka;
+        self.error_message = None;
+    }
+
+    pub fn submit_planka_setup(&mut self) {
+        let step = match self.planka_setup {
+            Some(s) => s,
+            None => return,
+        };
+        let mut cfg = self.planka_config.clone().unwrap_or_default();
+        match step {
+            PlankaSetupStep::Url => {
+                cfg.server_url = self.input_planka.trim().to_string();
+                self.input_planka.clear();
+                self.planka_setup = Some(PlankaSetupStep::Username);
+            }
+            PlankaSetupStep::Username => {
+                cfg.email_or_username = self.input_planka.trim().to_string();
+                self.input_planka.clear();
+                self.planka_setup = Some(PlankaSetupStep::Password);
+            }
+            PlankaSetupStep::Password => {
+                cfg.password = self.input_planka.clone();
+                self.input_planka.clear();
+                match PlankaClient::from_config(cfg.clone()) {
+                    Ok((_client, saved)) => {
+                        self.planka_config = Some(saved);
+                        let _ = planka::save_config(self.planka_config.as_ref().unwrap());
+                        self.error_message = Some("Planka login successful".to_string());
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("Planka login failed: {}", e));
+                    }
+                }
+                self.planka_setup = None;
+                self.input_mode = InputMode::Normal;
+            }
         }
     }
 
@@ -91,13 +180,36 @@ impl App {
             Some(parse_due_date(&self.input_due_date)?)
         };
 
-        self.todos.push(Todo {
+        let mut todo = Todo {
             description: self.input_description.clone(),
             done: false,
-            due_date: due_date_str,
+            due_date: due_date_str.clone(),
             created_date: Local::now().format("%Y-%m-%d").to_string(),
             project: self.current_project.clone(),
-        });
+            planka_card_id: None,
+            planka_list_id: None,
+            planka_board_id: None,
+        };
+        if let Ok(client) = self.ensure_planka_client() {
+            if self.planka_lists.is_none() {
+                if let Ok(lists) = client.resolve_lists(&self.current_project) {
+                    self.planka_lists = Some(lists);
+                }
+            }
+            if let Some(ref lists) = self.planka_lists {
+                match client.create_card(&lists.todo_list_id, &todo.description, due_date_str.as_deref()) {
+                    Ok(card_id) => {
+                        todo.planka_card_id = Some(card_id);
+                        todo.planka_list_id = Some(lists.todo_list_id.clone());
+                        todo.planka_board_id = Some(lists.board_id.clone());
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("Planka create card failed: {}", e));
+                    }
+                }
+            }
+        }
+        self.todos.push(todo);
 
         if !self.projects.iter().any(|p| p == &self.current_project) {
             self.projects.push(self.current_project.clone());
@@ -122,7 +234,19 @@ impl App {
 
     pub fn mark_done(&mut self) {
         if let Some(todo) = self.todos.get_mut(self.selected) {
-            todo.done = !todo.done;
+            let new_done = !todo.done;
+            if new_done {
+                if let (Ok(client), Some(ref lists), Some(ref card_id)) =
+                    (self.ensure_planka_client(), self.planka_lists.as_ref(), todo.planka_card_id.as_ref())
+                {
+                    if let Err(e) = client.move_card(card_id, &lists.done_list_id) {
+                        self.error_message = Some(format!("Planka move to Done failed: {}", e));
+                    } else {
+                        todo.planka_list_id = Some(lists.done_list_id.clone());
+                    }
+                }
+            }
+            todo.done = new_done;
         }
     }
 

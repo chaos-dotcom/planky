@@ -4,6 +4,7 @@ mod app;
 mod daemon;
 mod todo;
 mod tui;
+mod planka;
 
 use crate::app::{App, get_data_file_path};
 use crossterm::{

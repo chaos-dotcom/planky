@@ -95,6 +95,12 @@ where
                             app.input_project = app.current_project.clone();
                             app.error_message = None;
                         }
+                        KeyCode::Char('S') => {
+                            app.sync_current_project_from_planka();
+                        }
+                        KeyCode::Char('L') => {
+                            app.start_planka_setup();
+                        }
                         _ => {}
                     },
                     InputMode::EditingDescription => {
@@ -160,6 +166,23 @@ where
                         }
                         KeyCode::Backspace => {
                             app.input_project.pop();
+                        }
+                        _ => {}
+                    },
+                    InputMode::EditingPlanka => match key.code {
+                        KeyCode::Enter => {
+                            app.submit_planka_setup();
+                        }
+                        KeyCode::Esc => {
+                            app.planka_setup = None;
+                            app.input_planka.clear();
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Char(c) => {
+                            app.input_planka.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.input_planka.pop();
                         }
                         _ => {}
                     },
@@ -267,6 +290,11 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::raw(" next project, "),
         Span::styled("l", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" set project"),
+        Span::raw(", "),
+        Span::styled("S", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" sync Planka, "),
+        Span::styled("L", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" Planka login"),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[1]);
@@ -315,8 +343,29 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     f.render_stateful_widget(todos_list, chunks[2], &mut list_state);
 
-    // Project input (when editing) or Search input
-    if matches!(app.input_mode, InputMode::EditingProject) {
+    // Planka setup OR Project input OR Search input
+    if matches!(app.input_mode, InputMode::EditingPlanka) {
+        let title = match app.planka_setup {
+            Some(crate::app::PlankaSetupStep::Url) => "Planka URL",
+            Some(crate::app::PlankaSetupStep::Username) => "Planka Username or Email",
+            Some(crate::app::PlankaSetupStep::Password) => "Planka Password",
+            _ => "Planka Setup",
+        };
+        let style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let caret = "|";
+        let text = if app.input_planka.is_empty() {
+            caret.to_string()
+        } else {
+            format!("{}{}", app.input_planka, caret)
+        };
+        let widget = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .style(style)
+            .wrap(Wrap { trim: true });
+        f.render_widget(widget, chunks[3]);
+    } else if matches!(app.input_mode, InputMode::EditingProject) {
         let project_style = Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD);

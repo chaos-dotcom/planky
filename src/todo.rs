@@ -11,6 +11,12 @@ pub struct Todo {
     pub done: bool,
     #[serde(default = "default_project")]
     pub project: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planka_card_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planka_list_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planka_board_id: Option<String>,
 }
 
 impl Todo {
@@ -21,6 +27,9 @@ impl Todo {
             created_date: Local::now().format("%Y-%m-%d").to_string(),
             done: false,
             project: default_project(),
+            planka_card_id: None,
+            planka_list_id: None,
+            planka_board_id: None,
         }
     }
 }
