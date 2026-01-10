@@ -2,7 +2,6 @@
 use crate::todo::Todo;
 use crate::tui::parse_due_date;
 use chrono::Local;
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
@@ -19,10 +18,16 @@ fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
 fn default_current_project() -> String { "Inbox".to_string() }
 
 pub fn get_data_file_path() -> PathBuf {
-    let proj_dirs = ProjectDirs::from("com", "KushalMeghani", "RustyTodos")
-        .expect("Failed to get project directories");
-    let dir = proj_dirs.config_dir();
-    std::fs::create_dir_all(dir).unwrap();
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|p| p.join(".config"))
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+    let dir = base.join("RustyTodos");
+    std::fs::create_dir_all(&dir).ok();
     dir.join("todos.json")
 }
 
@@ -382,6 +387,8 @@ impl App {
                 let mut app: App =
                     serde_json::from_reader(reader).unwrap_or_else(|_| App::new());
                 app.refresh_projects_from_todos();
+                // Re-load Planka config each run (it’s not persisted in todos.json)
+                app.planka_config = planka::load_config();
                 app
             }
         } else {

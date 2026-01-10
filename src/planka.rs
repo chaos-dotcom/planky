@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
@@ -66,9 +65,16 @@ static INIT_LOG_ONCE: std::sync::Once = std::sync::Once::new();
 
 #[cfg(debug_assertions)]
 fn log_file_path() -> PathBuf {
-    let proj = ProjectDirs::from("com", "KushalMeghani", "RustyTodos").expect("proj dirs");
-    let dir = proj.config_dir();
-    create_dir_all(dir).ok();
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|p| p.join(".config"))
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+    let dir = base.join("RustyTodos");
+    create_dir_all(&dir).ok();
     dir.join("planka_debug.log")
 }
 
@@ -105,9 +111,16 @@ pub struct PlankaConfig {
 }
 
 pub fn config_path() -> PathBuf {
-    let proj = ProjectDirs::from("com", "KushalMeghani", "RustyTodos").expect("proj dirs");
-    let dir = proj.config_dir();
-    create_dir_all(dir).ok();
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|p| p.join(".config"))
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+    let dir = base.join("RustyTodos");
+    create_dir_all(&dir).ok();
     dir.join("planka.json")
 }
 
