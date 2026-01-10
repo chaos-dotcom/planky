@@ -35,7 +35,7 @@ pub struct PendingOp {
 
 #[derive(Clone, Debug)]
 pub enum Delta {
-    Upsert { project: String, id: String, name: String, due: Option<String>, done: bool },
+    Upsert { project: String, id: String, name: String, due: Option<String>, created: Option<String>, done: bool },
     // Delete could be added later when we compute removals in the poller
 }
 fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
@@ -129,6 +129,16 @@ fn format_planka_due(s: &str) -> Option<String> {
         Some(s[..10].to_string())
     } else {
         None
+    }
+}
+
+fn format_planka_created(s: &str) -> String {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        dt.with_timezone(&Local).format("%Y-%m-%d").to_string()
+    } else if s.len() >= 10 && s.chars().nth(4) == Some('-') {
+        s[..10].to_string()
+    } else {
+        Local::now().format("%Y-%m-%d").to_string()
     }
 }
 
@@ -278,6 +288,7 @@ impl App {
                                                 id: c.id.clone(),
                                                 name: c.name.clone(),
                                                 due: c.due.clone(),
+                                                created: c.created.clone(),
                                                 done: false,
                                             });
                                         }
@@ -289,6 +300,7 @@ impl App {
                                                 id: c.id.clone(),
                                                 name: c.name.clone(),
                                                 due: c.due.clone(),
+                                                created: c.created.clone(),
                                                 done: false,
                                             });
                                         }
@@ -300,6 +312,7 @@ impl App {
                                                 id: c.id.clone(),
                                                 name: c.name.clone(),
                                                 due: c.due.clone(),
+                                                created: c.created.clone(),
                                                 done: true,
                                             });
                                         }
@@ -316,7 +329,7 @@ impl App {
 
     pub fn apply_delta(&mut self, d: Delta) {
         match d {
-            Delta::Upsert { project, id, name, due, done } => {
+            Delta::Upsert { project, id, name, due, created, done } => {
                 // Skip overwriting local dirty items
                 if let Some(t) = self.todos.iter_mut().find(|t| t.project == project && t.planka_card_id.as_deref() == Some(id.as_str())) {
                     if t.sync_dirty { return; }
@@ -328,7 +341,10 @@ impl App {
                         description: name,
                         done,
                         due_date: due.as_deref().and_then(|s| format_planka_due(s)),
-                        created_date: Local::now().format("%Y-%m-%d").to_string(),
+                        created_date: created
+                            .as_deref()
+                            .map(|s| format_planka_created(s))
+                            .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string()),
                         project,
                         planka_card_id: Some(id),
                         planka_list_id: None,
@@ -512,7 +528,11 @@ impl App {
                                     description: card.name.clone(),
                                     done: is_done,
                                     due_date: card.due.as_deref().and_then(|s| format_planka_due(s)),
-                                    created_date: Local::now().format("%Y-%m-%d").to_string(),
+                                    created_date: card
+                                        .created
+                                        .as_deref()
+                                        .map(|s| format_planka_created(s))
+                                        .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string()),
                                     project: self.current_project.clone(),
                                     planka_card_id: Some(card.id.clone()),
                                     planka_list_id: if is_done {
@@ -621,7 +641,11 @@ impl App {
                         description: rcard.name.clone(),
                         done: *rdone,
                         due_date: rcard.due.as_deref().and_then(|s| format_planka_due(s)),
-                        created_date: Local::now().format("%Y-%m-%d").to_string(),
+                        created_date: rcard
+                            .created
+                            .as_deref()
+                            .map(|s| format_planka_created(s))
+                            .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string()),
                         project: proj.clone(),
                         planka_card_id: Some(rcard.id.clone()),
                         planka_list_id: Some(rlist.clone()),

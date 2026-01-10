@@ -344,13 +344,10 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .iter()
         .map(|t| {
             let status = if t.done { "[x]" } else { "[ ]" };
-            let due_date_str = t
-                .due_date
-                .clone()
-                .unwrap_or_else(|| "No due date".to_string());
+            let due_opt = t.due_date.as_ref();
             let mut desc_color = if t.done {
                 Color::Green
-            } else if is_overdue(&due_date_str) {
+            } else if due_opt.map(|s| is_overdue(s)).unwrap_or(false) {
                 Color::Red
             } else {
                 Color::Yellow
@@ -362,14 +359,15 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     }
                 }
             }
-            let line = Line::from(vec![
+            let mut parts: Vec<Span> = vec![
                 Span::raw(format!("{} ", status)),
                 Span::styled(&t.description, Style::default().fg(desc_color)),
-                Span::raw(format!(
-                    " (Due: {}) [Created: {}]",
-                    due_date_str, t.created_date
-                )),
-            ]);
+            ];
+            if let Some(due) = due_opt {
+                parts.push(Span::raw(format!(" (Due: {})", due)));
+            }
+            parts.push(Span::raw(format!(" [Created: {}]", t.created_date)));
+            let line = Line::from(parts);
             ListItem::new(line)
         })
         .collect();

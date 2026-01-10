@@ -682,11 +682,9 @@ impl PlankaClient {
                                 c.get("id").and_then(|x| x.as_str()),
                                 c.get("name").and_then(|x| x.as_str()),
                             ) {
-                                let due = c
-                                    .get("dueDate")
-                                    .and_then(|x| x.as_str())
-                                    .map(|s| s.to_string());
-                                out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                                let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
+                                let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                                out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due, created });
                             }
                         }
                         return Ok(out);
@@ -731,7 +729,8 @@ impl PlankaClient {
                     c.get("name").and_then(|x| x.as_str()),
                 ) {
                     let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                    let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due, created });
                 }
             }
         } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
@@ -741,7 +740,8 @@ impl PlankaClient {
                     c.get("name").and_then(|x| x.as_str()),
                 ) {
                     let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due });
+                    let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due, created });
                 }
             }
         }
@@ -828,4 +828,5 @@ pub struct PlankaCard {
     pub id: String,
     pub name: String,
     pub due: Option<String>,
+    pub created: Option<String>,
 }
