@@ -329,7 +329,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::styled("e", b), Span::raw(" edit, "),
             Span::styled("d", b), Span::raw(" done, "),
             Span::styled("w", b), Span::raw(" doing, "),
-            Span::styled("Shift+Backspace", b), Span::raw(" delete, "),
+            Span::styled("R", b), Span::raw(" delete, "),
             Span::styled("c", b), Span::raw(" copy, "),
             Span::styled("p", b), Span::raw(" paste"),
         ]),
