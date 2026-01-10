@@ -10,12 +10,12 @@ keywords = ["todo", "tui", "cli", "rust"]
 categories = ["command-line-utilities"]
 homepage = "https://github.com/KushalMeghani1644/RustyTodos.git"
 [dependencies]
-directories = "5.0"
-ratatui = "0.20"
-crossterm = "0.26"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
+directories = "6.0"
+ratatui = "0.30"
+crossterm = "0.29"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+chrono = { version = "0.4.42", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 notify-rust = "4"
@@ -24,4 +24,4 @@ notify-rust = "4"
 notifica = "3.0.2"
 
 [target.'cfg(target_os = "(macos)")'.dependencies]
-mac-notification-sys = "0.5"
+mac-notification-sys = "0.6.9"
