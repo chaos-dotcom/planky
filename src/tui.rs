@@ -113,7 +113,7 @@ where
                             app.input_description.pop();
                         }
                         _ => {}
-                    },
+                    }},
                     InputMode::EditingDueDate => match key.code {
                         KeyCode::Enter => match app.add_todo() {
                             Ok(_) => app.input_mode = InputMode::Normal,
