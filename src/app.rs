@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
+fn default_current_project() -> String { "Inbox".to_string() }
 
 pub fn get_data_file_path() -> PathBuf {
     let proj_dirs = ProjectDirs::from("com", "KushalMeghani", "RustyTodos")
@@ -21,12 +23,20 @@ pub enum InputMode {
     Normal,
     EditingDescription,
     EditingDueDate,
-    Searching, // Added for search mode
+    Searching,      // search mode
+    EditingProject, // project name editing
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct App {
     pub todos: Vec<Todo>,
+
+    #[serde(default = "default_projects")]
+    pub projects: Vec<String>,
+    #[serde(default = "default_current_project")]
+    pub current_project: String,
+    #[serde(skip)]
+    pub input_project: String,
 
     #[serde(skip)]
     pub input_mode: InputMode,
@@ -64,6 +74,9 @@ impl App {
             selected: 0,
             error_message: None,
             search_query: String::new(), // Initialize search_query
+            projects: default_projects(),
+            current_project: default_current_project(),
+            input_project: String::new(),
         }
     }
 
@@ -83,7 +96,12 @@ impl App {
             done: false,
             due_date: due_date_str,
             created_date: Local::now().format("%Y-%m-%d").to_string(),
+            project: self.current_project.clone(),
         });
+
+        if !self.projects.iter().any(|p| p == &self.current_project) {
+            self.projects.push(self.current_project.clone());
+        }
 
         // clear inputs after adding
         self.input_description.clear();
@@ -108,6 +126,56 @@ impl App {
         }
     }
 
+    pub fn next_project(&mut self) {
+        if self.projects.is_empty() {
+            self.projects = default_projects();
+        }
+        if let Some(pos) = self.projects.iter().position(|p| p == &self.current_project) {
+            let next = (pos + 1) % self.projects.len();
+            self.current_project = self.projects[next].clone();
+        } else {
+            self.current_project = self.projects[0].clone();
+        }
+    }
+    pub fn prev_project(&mut self) {
+        if self.projects.is_empty() {
+            self.projects = default_projects();
+        }
+        if let Some(pos) = self.projects.iter().position(|p| p == &self.current_project) {
+            let prev = (pos + self.projects.len() - 1) % self.projects.len();
+            self.current_project = self.projects[prev].clone();
+        } else {
+            self.current_project = self.projects[0].clone();
+        }
+    }
+    pub fn set_current_project<S: Into<String>>(&mut self, name: S) {
+        let name = name.into().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        if !self.projects.iter().any(|p| p == &name) {
+            self.projects.push(name.clone());
+        }
+        self.current_project = name;
+    }
+    pub fn refresh_projects_from_todos(&mut self) {
+        let mut uniq: Vec<String> = self
+            .todos
+            .iter()
+            .map(|t| t.project.clone())
+            .filter(|p| !p.is_empty())
+            .collect();
+        uniq.sort();
+        uniq.dedup();
+        if uniq.is_empty() {
+            uniq = default_projects();
+        }
+        self.projects = uniq;
+        if !self.projects.iter().any(|p| p == &self.current_project) {
+            self.current_project = self.projects[0].clone();
+        }
+    }
+
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let file = OpenOptions::new()
             .write(true)
@@ -126,7 +194,12 @@ impl App {
         let file = File::open(&path);
         if let Ok(file) = file {
             let reader = BufReader::new(file);
-            serde_json::from_reader(reader).unwrap_or_else(|_| App::new())
+            {
+                let mut app: App =
+                    serde_json::from_reader(reader).unwrap_or_else(|_| App::new());
+                app.refresh_projects_from_todos();
+                app
+            }
         } else {
             App::new()
         }

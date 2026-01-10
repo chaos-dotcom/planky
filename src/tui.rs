@@ -82,6 +82,19 @@ where
                                 }
                             }
                         }
+                        KeyCode::Char(']') => {
+                            app.next_project();
+                            app.selected = 0;
+                        }
+                        KeyCode::Char('[') => {
+                            app.prev_project();
+                            app.selected = 0;
+                        }
+                        KeyCode::Char('P') => {
+                            app.input_mode = InputMode::EditingProject;
+                            app.input_project = app.current_project.clone();
+                            app.error_message = None;
+                        }
                         _ => {}
                     },
                     InputMode::EditingDescription => {
@@ -132,6 +145,24 @@ where
                         }
                         _ => {}
                     },
+                    InputMode::EditingProject => match key.code {
+                        KeyCode::Enter => {
+                            let name = app.input_project.clone();
+                            app.set_current_project(name);
+                            app.selected = 0;
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Char(c) => {
+                            app.input_project.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.input_project.pop();
+                        }
+                        _ => {}
+                    },
                     InputMode::Searching => match key.code {
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
@@ -165,11 +196,15 @@ where
 
 fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
     if app.search_query.is_empty() {
-        app.todos.iter().collect()
+        app.todos
+            .iter()
+            .filter(|t| t.project == app.current_project)
+            .collect()
     } else {
         let q = app.search_query.to_lowercase();
         app.todos
             .iter()
+            .filter(|t| t.project == app.current_project)
             .filter(|t| {
                 t.description.to_lowercase().contains(&q)
                     || t.due_date
@@ -200,8 +235,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         )
         .split(size);
 
+    let title_text = format!("🌟 RustyTodos — {} 🌟", app.current_project);
     let title = Paragraph::new(Line::from(Span::styled(
-        "🌟 RustyTodos! 🌟",
+        title_text,
         Style::default().add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center);
@@ -224,6 +260,13 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::raw(" to copy, "),
         Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to paste"),
+        Span::raw(", "),
+        Span::styled("[", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" prev, "),
+        Span::styled("]", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" next project, "),
+        Span::styled("P", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" set project"),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(help, chunks[1]);
@@ -272,27 +315,44 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     f.render_stateful_widget(todos_list, chunks[2], &mut list_state);
 
-    // Search input
-    let search_style = if matches!(app.input_mode, InputMode::Searching) {
-        Style::default()
+    // Project input (when editing) or Search input
+    if matches!(app.input_mode, InputMode::EditingProject) {
+        let project_style = Style::default()
             .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::BOLD);
+        let caret = "|";
+        let project_with_caret = if app.input_project.is_empty() {
+            caret.to_string()
+        } else {
+            format!("{}{}", app.input_project, caret)
+        };
+        let project_input = Paragraph::new(project_with_caret)
+            .block(Block::default().borders(Borders::ALL).title("Project"))
+            .style(project_style)
+            .wrap(Wrap { trim: true });
+        f.render_widget(project_input, chunks[3]);
     } else {
-        Style::default()
-    };
-    let caret = "|";
-    let search_with_caret = if matches!(app.input_mode, InputMode::Searching) {
-        format!("Search: {}{}", app.search_query, caret)
-    } else if !app.search_query.is_empty() {
-        format!("Search: {}", app.search_query)
-    } else {
-        "".to_string()
-    };
-    let search_input = Paragraph::new(search_with_caret)
-        .block(Block::default().borders(Borders::ALL).title("Search"))
-        .style(search_style)
-        .wrap(Wrap { trim: true });
-    f.render_widget(search_input, chunks[3]);
+        let search_style = if matches!(app.input_mode, InputMode::Searching) {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let caret = "|";
+        let search_with_caret = if matches!(app.input_mode, InputMode::Searching) {
+            format!("Search: {}{}", app.search_query, caret)
+        } else if !app.search_query.is_empty() {
+            format!("Search: {}", app.search_query)
+        } else {
+            "".to_string()
+        };
+        let search_input = Paragraph::new(search_with_caret)
+            .block(Block::default().borders(Borders::ALL).title("Search"))
+            .style(search_style)
+            .wrap(Wrap { trim: true });
+        f.render_widget(search_input, chunks[3]);
+    }
 
     // Description and due date input fields (unchanged)
     let description_style = if matches!(app.input_mode, InputMode::EditingDescription) {
