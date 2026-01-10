@@ -3,15 +3,6 @@
 Planky™ is a fast, lightweight, and interactive terminal Todo app built in Rust.  
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
  
-## Trademark Notice
-The names “Rusty-Suite”, “Planky”, “RustyBoot”, and “Rusty-Checker” are part of this project’s identity.  
-See [TRADEMARK.md](TRADEMARK.md) for details.
-
-**Planky™** is a fast, lightweight, and interactive terminal Todo app built in Rust.  
-Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
-
-![DEMO FOR MY APP](https://raw.githubusercontent.com/KushalMeghani1644/Planky/0bed35d4fc2228ed3571e4c06aeb2edfda36e5f9/media/Planky_demo.gif)
-
 ## Features
 
 - [x] Interactive terminal UI (TUI)  
