@@ -71,7 +71,7 @@ where
                                 app.selected -= 1;
                             }
                         }
-                        KeyCode::Char('C') => {
+                        KeyCode::Char('c') => {
                             let list = filtered_todos(app);
                             if let Some(todo) = list.get(app.selected) {
                                 if let Err(e) = copy_to_clipboard(&todo.description) {
