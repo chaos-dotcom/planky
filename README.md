@@ -1,5 +1,9 @@
 # Planky 🦀 - A Modern TUI Todo App
 
+Thanks to https://github.com/KushalMeghani1644/RustyTodos for the initial code of which Planky is Based. 
+
+
+
 Planky is a fast, lightweight, and interactive terminal Todo app and Planka client built in Rust.  
 It keeps your todos in sync with your Planka boards (boards = projects), with near‑realtime updates.
 Manage your tasks visually with an intuitive TUI—add, list, mark as done, and delete todos—right from your terminal!
