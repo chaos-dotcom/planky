@@ -45,7 +45,7 @@ where
                         }
                         KeyCode::Char('d') => app.delete_todo(),
                         KeyCode::Char('m') => app.mark_done(),
-                        KeyCode::Char('/') => {
+                        KeyCode::Char('k') => {
                             app.mark_doing();
                         }
                         KeyCode::Char('?') => {
@@ -284,7 +284,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::raw(" to mark done, "),
         Span::styled("d", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to delete, "),
-        Span::styled("/", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("k", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" mark doing, "),
         Span::styled("?", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to search, "),
