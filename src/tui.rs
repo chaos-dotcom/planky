@@ -366,7 +366,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     .unwrap_or(false);
 
             let status = if t.done {
-                "[x]"
+                "[d]"
             } else if is_doing {
                 "[w]"
             } else {
