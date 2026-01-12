@@ -387,7 +387,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::raw(" "),
             Span::styled(" Tools ", tools_style),
         ]);
-        let tabs = Paragraph::new(tabs_line).alignment(Alignment::Center);
+        let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
         f.render_widget(tabs, rows[0]);
 
         // Tools list
@@ -441,7 +441,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::raw(" "),
         Span::styled(" Tools ", tools_style),
     ]);
-    let tabs = Paragraph::new(tabs_line).alignment(Alignment::Center);
+    let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
     f.render_widget(tabs, chunks[0]);
 
     let board_name = &app.current_project;
