@@ -314,11 +314,22 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         )
         .split(size);
 
-    let title_text = if app.pending_ops_len() > 0 {
-        format!("🌈 Planky — {} 🌈🏴‍☠️ ⇅{}", app.current_project, app.pending_ops_len())
+    let board_name = &app.current_project;
+    let project_name = app
+        .planka_boards
+        .iter()
+        .find(|b| b.name == *board_name)
+        .and_then(|b| b.project_name.as_deref())
+        .map(|s| s.to_string());
+
+    let mut title_text = if let Some(pn) = project_name {
+        format!("🌈 Planky — {} — {} 🌈", pn, board_name)
     } else {
-        format!("🌈 Planky — {} 🌈", app.current_project)
+        format!("🌈 Planky — {} 🌈", board_name)
     };
+    if app.pending_ops_len() > 0 {
+        title_text = format!("{}🏴‍☠️ ⇅{}", title_text, app.pending_ops_len());
+    }
     let title = Paragraph::new(Line::from(Span::styled(
         title_text,
         Style::default().add_modifier(Modifier::BOLD),

@@ -9,6 +9,7 @@ use std::io::{BufReader, BufWriter};
 #[cfg(debug_assertions)]
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 #[cfg(debug_assertions)]
 fn log_http_request(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) {
@@ -220,23 +221,39 @@ impl PlankaClient {
         }
         let v: Value =
             serde_json::from_str(&text).map_err(|e| format!("parse projects failed: {}", e))?;
+        let mut proj_names: HashMap<String, String> = HashMap::new();
         let mut project_ids: Vec<String> = Vec::new();
         if let Some(arr) = v.as_array() {
             for p in arr {
                 if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
                     project_ids.push(id.to_string());
+                    if let Some(pname) = p.get("name").and_then(|x| x.as_str())
+                        .or_else(|| p.get("title").and_then(|x| x.as_str()))
+                    {
+                        proj_names.insert(id.to_string(), pname.to_string());
+                    }
                 }
             }
         } else if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
             for p in items {
                 if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
                     project_ids.push(id.to_string());
+                    if let Some(pname) = p.get("name").and_then(|x| x.as_str())
+                        .or_else(|| p.get("title").and_then(|x| x.as_str()))
+                    {
+                        proj_names.insert(id.to_string(), pname.to_string());
+                    }
                 }
             }
         } else if let Some(projects) = v.get("projects").and_then(|x| x.as_array()) {
             for p in projects {
                 if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
                     project_ids.push(id.to_string());
+                    if let Some(pname) = p.get("name").and_then(|x| x.as_str())
+                        .or_else(|| p.get("title").and_then(|x| x.as_str()))
+                    {
+                        proj_names.insert(id.to_string(), pname.to_string());
+                    }
                 }
             }
         }
@@ -254,7 +271,8 @@ impl PlankaClient {
                         .or_else(|| b.get("title").and_then(|x| x.as_str())),
                 ) {
                     let project_id = b.get("projectId").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string(), project_id });
+                    let project_name = project_id.as_ref().and_then(|pid| proj_names.get(pid)).cloned();
+                    boards.push(PlankaBoard { id: id.to_string(), name: name.to_string(), project_id, project_name });
                 }
             }
         }
@@ -305,10 +323,12 @@ impl PlankaClient {
                             .and_then(|x| x.as_str())
                             .map(|s| s.to_string())
                             .or_else(|| Some(pid.clone()));
+                        let project_name = project_id.as_ref().and_then(|p| proj_names.get(p)).cloned();
                         boards.push(PlankaBoard {
                             id: id.to_string(),
                             name: name.to_string(),
                             project_id,
+                            project_name,
                         });
                     }
                 }
@@ -324,10 +344,12 @@ impl PlankaClient {
                             .and_then(|x| x.as_str())
                             .map(|s| s.to_string())
                             .or_else(|| Some(pid.clone()));
+                        let project_name = project_id.as_ref().and_then(|p| proj_names.get(p)).cloned();
                         boards.push(PlankaBoard {
                             id: id.to_string(),
                             name: name.to_string(),
                             project_id,
+                            project_name,
                         });
                     }
                 }
@@ -813,6 +835,7 @@ pub struct PlankaBoard {
     pub id: String,
     pub name: String,
     pub project_id: Option<String>,
+    pub project_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
