@@ -523,7 +523,7 @@ impl PlankaClient {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{}/api/projects", base);
         let auth = self.auth_header();
-        let body = json!({ "name": name });
+        let body = json!({ "type": "private", "name": name });
         #[cfg(debug_assertions)]
         log_http_request(
             "POST",
@@ -539,6 +539,7 @@ impl PlankaClient {
             .post(&url)
             .header("Authorization", auth)
             .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
@@ -578,6 +579,7 @@ impl PlankaClient {
             .post(&url)
             .header("Authorization", auth)
             .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
