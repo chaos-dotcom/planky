@@ -28,6 +28,12 @@ where
     // Eagerly resolve lists for the current project so [w] is shown immediately
     if app.planka_lists_by_board.get(&app.current_project).is_none() {
         if let Ok(client) = app.ensure_planka_client() {
+            // Ensure boards are cached so the header can show "Project - Board"
+            if app.planka_boards.is_empty() {
+                if let Ok(boards) = client.fetch_boards() {
+                    app.planka_boards = boards;
+                }
+            }
             if let Ok(lists) = client.resolve_lists(&app.current_project) {
                 app.planka_lists_by_board
                     .insert(app.current_project.clone(), lists.clone());
