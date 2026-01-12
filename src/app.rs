@@ -1125,6 +1125,15 @@ impl App {
         } else {
             self.current_project = self.projects[0].clone();
         }
+        if self.planka_lists_by_board.get(&self.current_project).is_none() {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Ok(lists) = client.resolve_lists(&self.current_project) {
+                    self.planka_lists_by_board
+                        .insert(self.current_project.clone(), lists.clone());
+                    self.planka_lists = Some(lists);
+                }
+            }
+        }
     }
     pub fn prev_project(&mut self) {
         if self.projects.is_empty() {
@@ -1136,6 +1145,15 @@ impl App {
         } else {
             self.current_project = self.projects[0].clone();
         }
+        if self.planka_lists_by_board.get(&self.current_project).is_none() {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Ok(lists) = client.resolve_lists(&self.current_project) {
+                    self.planka_lists_by_board
+                        .insert(self.current_project.clone(), lists.clone());
+                    self.planka_lists = Some(lists);
+                }
+            }
+        }
     }
     pub fn set_current_project<S: Into<String>>(&mut self, name: S) {
         let name = name.into().trim().to_string();
@@ -1146,6 +1164,15 @@ impl App {
             self.projects.push(name.clone());
         }
         self.current_project = name;
+        if self.planka_lists_by_board.get(&self.current_project).is_none() {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Ok(lists) = client.resolve_lists(&self.current_project) {
+                    self.planka_lists_by_board
+                        .insert(self.current_project.clone(), lists.clone());
+                    self.planka_lists = Some(lists);
+                }
+            }
+        }
     }
     pub fn refresh_projects_from_todos(&mut self) {
         let mut uniq: Vec<String> = self

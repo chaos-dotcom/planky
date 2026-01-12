@@ -23,6 +23,19 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Res
 where
     std::io::Error: From<<B as Backend>::Error>,
 {
+    app.start_background_sync();
+
+    // Eagerly resolve lists for the current project so [w] is shown immediately
+    if app.planka_lists_by_board.get(&app.current_project).is_none() {
+        if let Ok(client) = app.ensure_planka_client() {
+            if let Ok(lists) = client.resolve_lists(&app.current_project) {
+                app.planka_lists_by_board
+                    .insert(app.current_project.clone(), lists.clone());
+                app.planka_lists = Some(lists);
+            }
+        }
+    }
+
     loop {
         // process inbound updates and retry queued outbound ops
         app.drain_inbound();
