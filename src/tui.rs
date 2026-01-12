@@ -48,7 +48,7 @@ where
                             app.begin_edit_selected();
                         }
                         // Delete selected todo
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                        KeyCode::Char('r') | KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                             app.delete_todo();
                         }
                         KeyCode::Backspace => {
