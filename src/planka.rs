@@ -519,6 +519,82 @@ impl PlankaClient {
         })
     }
 
+    pub fn create_project(&self, name: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects", base);
+        let auth = self.auth_header();
+        let body = json!({ "name": name });
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "POST",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("Content-Type", "application/json"),
+            ],
+            Some(&body.to_string()),
+        );
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Create project failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create_project failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .or_else(|| v.get("id").and_then(|x| x.as_str()))
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Create project response missing id".to_string())
+    }
+
+    pub fn create_board(&self, project_id: &str, name: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards", base);
+        let auth = self.auth_header();
+        let body = json!({ "projectId": project_id, "name": name, "position": 65536 });
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "POST",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("Content-Type", "application/json"),
+            ],
+            Some(&body.to_string()),
+        );
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Create board failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create_board failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .or_else(|| v.get("id").and_then(|x| x.as_str()))
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Create board response missing id".to_string())
+    }
+
     pub fn create_card(&self, list_id: &str, name: &str, due: Option<&str>) -> Result<String, String> {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{}/api/lists/{}/cards", base, list_id);

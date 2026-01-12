@@ -230,21 +230,59 @@ where
                         }
                         _ => {}
                     },
+                    InputMode::CreatingBoard => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_create_board() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Char(c) => {
+                            app.input_board.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.input_board.pop();
+                        }
+                        _ => {}
+                    },
+                    InputMode::CreatingProject => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_create_project() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Char(c) => {
+                            app.input_project.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.input_project.pop();
+                        }
+                        _ => {}
+                    },
                     InputMode::ControlCenter => match key.code {
                         KeyCode::Esc | KeyCode::Tab => {
                             app.input_mode = InputMode::Normal;
                         }
                         KeyCode::Down => {
-                            if app.control_center_index < 2 { app.control_center_index += 1; }
+                            if app.control_center_index < 4 { app.control_center_index += 1; }
                         }
                         KeyCode::Up => {
                             if app.control_center_index > 0 { app.control_center_index -= 1; }
                         }
                         KeyCode::Enter => {
                             match app.control_center_index {
-                                0 => { app.start_planka_setup(); app.input_mode = InputMode::EditingPlanka; }
-                                1 => { app.sync_all_projects_from_planka(); app.input_mode = InputMode::Normal; }
-                                2 => { app.input_mode = InputMode::Normal; }
+                                0 => { app.begin_create_board(); }      // New board
+                                1 => { app.begin_create_project(); }    // New project
+                                2 => { app.start_planka_setup(); app.input_mode = InputMode::EditingPlanka; }
+                                3 => { app.sync_all_projects_from_planka(); app.input_mode = InputMode::Normal; }
+                                4 => { app.input_mode = InputMode::Normal; }
                                 _ => {}
                             }
                         }
@@ -336,7 +374,24 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let size = f.area();
 
     if matches!(app.input_mode, InputMode::ControlCenter) {
-        let items = ["Login/setup", "Sync all projects", "Back to tasks"];
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(size);
+
+        // Tabs row
+        let tasks_style = Style::default();
+        let tools_style = Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD);
+        let tabs_line = Line::from(vec![
+            Span::styled(" Tasks ", tasks_style),
+            Span::raw(" "),
+            Span::styled(" Tools ", tools_style),
+        ]);
+        let tabs = Paragraph::new(tabs_line).alignment(Alignment::Center);
+        f.render_widget(tabs, rows[0]);
+
+        // Tools list
+        let items = ["New board", "New project", "Login/setup", "Sync all projects", "Back to tasks"];
         let list_items: Vec<ListItem> = items.iter().enumerate().map(|(i, label)| {
             let style = if i == app.control_center_index {
                 Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)
@@ -345,17 +400,17 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             };
             ListItem::new(Line::from(Span::styled(*label, style)))
         }).collect();
-
         let mut state = ratatui::widgets::ListState::default();
         state.select(Some(app.control_center_index));
         let list = List::new(list_items)
             .block(Block::default().borders(Borders::ALL).title("Tools"))
             .highlight_symbol(">> ");
-        f.render_stateful_widget(list, size, &mut state);
+        f.render_stateful_widget(list, rows[1], &mut state);
         return;
     }
 
     let mut constraints = vec![
+        Constraint::Length(1), // tabs
         Constraint::Length(3), // title
         Constraint::Length(3), // help
         Constraint::Min(1),    // todo list
@@ -366,6 +421,8 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::EditingDueDate
             | InputMode::EditingProject
             | InputMode::EditingPlanka
+            | InputMode::CreatingBoard
+            | InputMode::CreatingProject
             | InputMode::Searching
     );
     if needs_input {
@@ -376,6 +433,16 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .margin(2)
         .constraints(constraints)
         .split(size);
+
+    let tasks_style = Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD);
+    let tools_style = Style::default();
+    let tabs_line = Line::from(vec![
+        Span::styled(" Tasks ", tasks_style),
+        Span::raw(" "),
+        Span::styled(" Tools ", tools_style),
+    ]);
+    let tabs = Paragraph::new(tabs_line).alignment(Alignment::Center);
+    f.render_widget(tabs, chunks[0]);
 
     let board_name = &app.current_project;
     let project_name = app
@@ -398,7 +465,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         Style::default().add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center);
-    f.render_widget(title, chunks[0]);
+    f.render_widget(title, chunks[1]);
 
     let b = Style::default().add_modifier(Modifier::BOLD);
     let help = Paragraph::new(vec![
@@ -424,9 +491,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         ]),
     ])
     .alignment(Alignment::Center);
-    f.render_widget(help, chunks[1]);
+    f.render_widget(help, chunks[2]);
 
-    let list_area = chunks[2];
+    let list_area = chunks[3];
     let inner_width = list_area.width.saturating_sub(2) as usize; // minus left/right borders
 
     let todos: Vec<ListItem> = filtered_todos(app)
@@ -491,7 +558,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         )
         .highlight_symbol(">> ");
 
-    f.render_stateful_widget(todos_list, chunks[2], &mut list_state);
+    f.render_stateful_widget(todos_list, chunks[3], &mut list_state);
 
     // Optional single-line input at bottom (only when editing)
     if needs_input {
@@ -536,6 +603,22 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                         .borders(Borders::ALL)
                         .title("Due") // shortened title
                 )
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingBoard) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_board.is_empty() { caret.to_string() } else { format!("{}{}", app.input_board, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("New Board Name"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingProject) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_project.is_empty() { caret.to_string() } else { format!("{}{}", app.input_project, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("New Project Name"))
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);

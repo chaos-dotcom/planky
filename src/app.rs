@@ -63,6 +63,8 @@ pub enum InputMode {
     Searching,      // search mode
     EditingProject, // project name editing
     EditingPlanka,  // Planka setup flow
+    CreatingBoard,
+    CreatingProject,
     ControlCenter,
 }
 
@@ -76,6 +78,8 @@ pub struct App {
     pub current_project: String,
     #[serde(skip)]
     pub input_project: String,
+    #[serde(skip)]
+    pub input_board: String,
 
     #[serde(skip)]
     pub input_mode: InputMode,
@@ -219,6 +223,7 @@ impl App {
             projects: default_projects(),
             current_project: default_current_project(),
             input_project: String::new(),
+            input_board: String::new(),
             planka_config: planka::load_config(),
             planka_lists: None,
             planka_lists_by_board: HashMap::new(),
@@ -802,6 +807,65 @@ impl App {
                 self.input_mode = InputMode::Normal;
             }
         }
+    }
+
+    pub fn begin_create_board(&mut self) {
+        self.input_board.clear();
+        self.input_mode = InputMode::CreatingBoard;
+        self.error_message = None;
+    }
+
+    pub fn submit_create_board(&mut self) -> Result<(), String> {
+        let name = self.input_board.trim().to_string();
+        if name.is_empty() {
+            return Err("Board name cannot be empty.".to_string());
+        }
+        let client = self.ensure_planka_client()?;
+        let proj_id = self
+            .planka_boards
+            .iter()
+            .find(|b| b.name == self.current_project)
+            .and_then(|b| b.project_id.clone())
+            .ok_or_else(|| "Current board not found on Planka; sync first.".to_string())?;
+        let _bid = client.create_board(&proj_id, &name)?;
+        if let Ok(boards) = client.fetch_boards() {
+            self.planka_boards = boards.clone();
+            self.projects = boards.iter().map(|b| b.name.clone()).collect();
+        }
+        self.current_project = name;
+        self.selected = 0;
+        self.input_board.clear();
+        self.input_mode = InputMode::Normal;
+        self.error_message = Some("Board created".to_string());
+        Ok(())
+    }
+
+    pub fn begin_create_project(&mut self) {
+        self.input_project.clear();
+        self.input_mode = InputMode::CreatingProject;
+        self.error_message = None;
+    }
+
+    pub fn submit_create_project(&mut self) -> Result<(), String> {
+        let name = self.input_project.trim().to_string();
+        if name.is_empty() {
+            return Err("Project name cannot be empty.".to_string());
+        }
+        let client = self.ensure_planka_client()?;
+        let pid = client.create_project(&name)?;
+        // Create a first board in the new project
+        let first_board = "Main".to_string();
+        let _bid = client.create_board(&pid, &first_board)?;
+        if let Ok(boards) = client.fetch_boards() {
+            self.planka_boards = boards.clone();
+            self.projects = boards.iter().map(|b| b.name.clone()).collect();
+        }
+        self.current_project = first_board;
+        self.selected = 0;
+        self.input_project.clear();
+        self.input_mode = InputMode::Normal;
+        self.error_message = Some("Project created".to_string());
+        Ok(())
     }
 
     pub fn begin_edit_selected(&mut self) {
