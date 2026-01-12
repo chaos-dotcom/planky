@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
@@ -80,6 +80,11 @@ pub struct App {
     pub input_project: String,
     #[serde(skip)]
     pub input_board: String,
+
+    #[serde(skip)]
+    pub create_board_projects: Vec<(String, String)>, // (project_id, project_name)
+    #[serde(skip)]
+    pub create_board_project_index: usize,
 
     #[serde(skip)]
     pub input_mode: InputMode,
@@ -224,6 +229,8 @@ impl App {
             current_project: default_current_project(),
             input_project: String::new(),
             input_board: String::new(),
+            create_board_projects: Vec::new(),
+            create_board_project_index: 0,
             planka_config: planka::load_config(),
             planka_lists: None,
             planka_lists_by_board: HashMap::new(),
@@ -811,8 +818,48 @@ impl App {
 
     pub fn begin_create_board(&mut self) {
         self.input_board.clear();
-        self.input_mode = InputMode::CreatingBoard;
         self.error_message = None;
+
+        // Ensure boards cache is present
+        if self.planka_boards.is_empty() {
+            if let Ok(client) = self.ensure_planka_client() {
+                if let Ok(boards) = client.fetch_boards() {
+                    self.planka_boards = boards;
+                }
+            }
+        }
+
+        // Build unique project list from boards
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut projects: Vec<(String, String)> = Vec::new();
+        for b in &self.planka_boards {
+            if let Some(ref pid) = b.project_id {
+                if seen.insert(pid.clone()) {
+                    let pname = b.project_name.clone().unwrap_or_else(|| "Project".to_string());
+                    projects.push((pid.clone(), pname));
+                }
+            }
+        }
+        // Sort by name for stable UX
+        projects.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+
+        // Default selection: the project of the current board (if found)
+        let mut sel = 0usize;
+        if let Some(cur_pid) = self
+            .planka_boards
+            .iter()
+            .find(|b| b.name == self.current_project)
+            .and_then(|b| b.project_id.clone())
+        {
+            if let Some(pos) = projects.iter().position(|(id, _)| *id == cur_pid) {
+                sel = pos;
+            }
+        }
+
+        self.create_board_projects = projects;
+        self.create_board_project_index = sel;
+
+        self.input_mode = InputMode::CreatingBoard;
     }
 
     pub fn submit_create_board(&mut self) -> Result<(), String> {
@@ -821,12 +868,18 @@ impl App {
             return Err("Board name cannot be empty.".to_string());
         }
         let client = self.ensure_planka_client()?;
-        let proj_id = self
-            .planka_boards
-            .iter()
-            .find(|b| b.name == self.current_project)
-            .and_then(|b| b.project_id.clone())
-            .ok_or_else(|| "Current board not found on Planka; sync first.".to_string())?;
+        let proj_id = if let Some((id, _name)) = self
+            .create_board_projects
+            .get(self.create_board_project_index)
+        {
+            id.clone()
+        } else {
+            self.planka_boards
+                .iter()
+                .find(|b| b.name == self.current_project)
+                .and_then(|b| b.project_id.clone())
+                .ok_or_else(|| "No project selected and current board not found on Planka; sync first.".to_string())?
+        };
         let _bid = client.create_board(&proj_id, &name)?;
         if let Ok(boards) = client.fetch_boards() {
             self.planka_boards = boards.clone();
@@ -837,6 +890,8 @@ impl App {
         self.input_board.clear();
         self.input_mode = InputMode::Normal;
         self.error_message = Some("Board created".to_string());
+        self.create_board_projects.clear();
+        self.create_board_project_index = 0;
         Ok(())
     }
 

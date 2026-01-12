@@ -240,6 +240,20 @@ where
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
                         }
+                        KeyCode::Left | KeyCode::Char('[') => {
+                            if !app.create_board_projects.is_empty() {
+                                if app.create_board_project_index == 0 {
+                                    app.create_board_project_index = app.create_board_projects.len() - 1;
+                                } else {
+                                    app.create_board_project_index -= 1;
+                                }
+                            }
+                        }
+                        KeyCode::Right | KeyCode::Char(']') => {
+                            if !app.create_board_projects.is_empty() {
+                                app.create_board_project_index = (app.create_board_project_index + 1) % app.create_board_projects.len();
+                            }
+                        }
                         KeyCode::Char(c) => {
                             app.input_board.push(c);
                         }
@@ -609,8 +623,13 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         } else if matches!(app.input_mode, InputMode::CreatingBoard) {
             let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
             let text = if app.input_board.is_empty() { caret.to_string() } else { format!("{}{}", app.input_board, caret) };
+            let proj_name = app
+                .create_board_projects
+                .get(app.create_board_project_index)
+                .map(|(_, name)| name.as_str())
+                .unwrap_or("Select project");
             let widget = Paragraph::new(text)
-                .block(Block::default().borders(Borders::ALL).title("New Board Name"))
+                .block(Block::default().borders(Borders::ALL).title(format!("New Board (Project: {})", proj_name)))
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);
