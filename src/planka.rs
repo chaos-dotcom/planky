@@ -559,9 +559,10 @@ impl PlankaClient {
 
     pub fn create_board(&self, project_id: &str, name: &str) -> Result<String, String> {
         let base = self.base_url.trim_end_matches('/');
-        let url = format!("{}/api/boards", base);
+        // Per API: POST /projects/{projectId}/boards
+        let url = format!("{}/api/projects/{}/boards", base, project_id);
         let auth = self.auth_header();
-        let body = json!({ "projectId": project_id, "name": name, "position": 65536 });
+        let body = json!({ "name": name, "position": 65536 });
         #[cfg(debug_assertions)]
         log_http_request(
             "POST",
