@@ -47,11 +47,16 @@ where
                         KeyCode::Char('e') => {
                             app.begin_edit_selected();
                         }
-                        // Shift+Backspace to delete selected todo
+                        // Delete selected todo
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            app.delete_todo();
+                        }
                         KeyCode::Backspace => {
-                            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                app.delete_todo();
-                            }
+                            // Treat Backspace as delete (Shift modifier is unreliable on some terminals)
+                            app.delete_todo();
+                        }
+                        KeyCode::Delete => {
+                            app.delete_todo();
                         }
                         KeyCode::Char('d') => app.mark_done(),
                         KeyCode::Char('w') => {
@@ -329,7 +334,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::styled("e", b), Span::raw(" edit, "),
             Span::styled("d", b), Span::raw(" done, "),
             Span::styled("w", b), Span::raw(" doing, "),
-            Span::styled("R", b), Span::raw(" delete, "),
+            Span::styled("R", b), Span::raw("/Backspace delete, "),
             Span::styled("c", b), Span::raw(" copy, "),
             Span::styled("p", b), Span::raw(" paste"),
         ]),
