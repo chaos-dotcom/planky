@@ -35,7 +35,7 @@ pub struct PendingOp {
 
 #[derive(Clone, Debug)]
 pub enum Delta {
-    Upsert { project: String, id: String, name: String, due: Option<String>, created: Option<String>, done: bool },
+    Upsert { project: String, id: String, name: String, due: Option<String>, created: Option<String>, done: bool, list_id: String },
     // Delete could be added later when we compute removals in the poller
 }
 fn default_projects() -> Vec<String> { vec!["Inbox".to_string()] }
@@ -290,6 +290,7 @@ impl App {
                                                 due: c.due.clone(),
                                                 created: c.created.clone(),
                                                 done: false,
+                                                list_id: lists.todo_list_id.clone(),
                                             });
                                         }
                                     }
@@ -302,6 +303,7 @@ impl App {
                                                 due: c.due.clone(),
                                                 created: c.created.clone(),
                                                 done: false,
+                                                list_id: lists.doing_list_id.clone(),
                                             });
                                         }
                                     }
@@ -314,6 +316,7 @@ impl App {
                                                 due: c.due.clone(),
                                                 created: c.created.clone(),
                                                 done: true,
+                                                list_id: lists.done_list_id.clone(),
                                             });
                                         }
                                     }
@@ -329,13 +332,14 @@ impl App {
 
     pub fn apply_delta(&mut self, d: Delta) {
         match d {
-            Delta::Upsert { project, id, name, due, created, done } => {
+            Delta::Upsert { project, id, name, due, created, done, list_id } => {
                 // Skip overwriting local dirty items
                 if let Some(t) = self.todos.iter_mut().find(|t| t.project == project && t.planka_card_id.as_deref() == Some(id.as_str())) {
                     if t.sync_dirty { return; }
                     t.description = name;
                     t.done = done;
                     t.due_date = due.as_deref().and_then(|s| format_planka_due(s));
+                    t.planka_list_id = Some(list_id.clone());
                 } else {
                     self.todos.push(Todo {
                         description: name,
@@ -347,7 +351,7 @@ impl App {
                             .unwrap_or_else(|| Local::now().format("%Y-%m-%d").to_string()),
                         project,
                         planka_card_id: Some(id),
-                        planka_list_id: None,
+                        planka_list_id: Some(list_id),
                         planka_board_id: None,
                         sync_dirty: false,
                     });
