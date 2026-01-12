@@ -19,6 +19,26 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use textwrap::wrap;
 
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let v = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    let h = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(v[1]);
+    h[1]
+}
+
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
 where
     std::io::Error: From<<B as Backend>::Error>,
@@ -140,6 +160,10 @@ where
                         KeyCode::Char('L') => {
                             app.start_planka_setup();
                         }
+                        KeyCode::Tab => {
+                            app.input_mode = InputMode::ControlCenter;
+                            app.error_message = None;
+                        }
                         _ => {}
                     },
                     InputMode::EditingDescription => {
@@ -232,6 +256,26 @@ where
                         }
                         _ => {}
                     },
+                    InputMode::ControlCenter => match key.code {
+                        KeyCode::Esc | KeyCode::Tab => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Down => {
+                            if app.control_center_index < 2 { app.control_center_index += 1; }
+                        }
+                        KeyCode::Up => {
+                            if app.control_center_index > 0 { app.control_center_index -= 1; }
+                        }
+                        KeyCode::Enter => {
+                            match app.control_center_index {
+                                0 => { app.start_planka_setup(); app.input_mode = InputMode::EditingPlanka; }
+                                1 => { app.sync_all_projects_from_planka(); app.input_mode = InputMode::Normal; }
+                                2 => { app.input_mode = InputMode::Normal; }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    },
                     InputMode::Searching => match key.code {
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
@@ -317,20 +361,45 @@ fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
 fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let size = f.area();
 
+    if matches!(app.input_mode, InputMode::ControlCenter) {
+        let items = ["Login/setup", "Sync all projects", "Back to tasks"];
+        let list_items: Vec<ListItem> = items.iter().enumerate().map(|(i, label)| {
+            let style = if i == app.control_center_index {
+                Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(Span::styled(*label, style)))
+        }).collect();
+
+        let mut state = ratatui::widgets::ListState::default();
+        state.select(Some(app.control_center_index));
+        let list = List::new(list_items)
+            .block(Block::default().borders(Borders::ALL).title("Tools"))
+            .highlight_symbol(">> ");
+        f.render_stateful_widget(list, size, &mut state);
+        return;
+    }
+
+    let mut constraints = vec![
+        Constraint::Length(3), // title
+        Constraint::Length(3), // help
+        Constraint::Min(1),    // todo list
+    ];
+    let needs_input = matches!(
+        app.input_mode,
+        InputMode::EditingDescription
+            | InputMode::EditingDueDate
+            | InputMode::EditingProject
+            | InputMode::EditingPlanka
+    );
+    if needs_input {
+        constraints.push(Constraint::Length(3)); // one input line only
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // title
-                Constraint::Length(3), // help
-                Constraint::Min(1),    // todo list
-                Constraint::Length(3), // search input
-                Constraint::Length(5), // description input
-                Constraint::Length(3), // due date input
-            ]
-            .as_ref(),
-        )
+        .constraints(constraints)
         .split(size);
 
     let board_name = &app.current_project;
@@ -375,6 +444,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::styled("l", b), Span::raw(" set project, "),
             Span::styled("S", b), Span::raw(" sync, "),
             Span::styled("L", b), Span::raw(" login, "),
+            Span::styled("Tab", b), Span::raw(" tools, "),
             Span::styled("q", b), Span::raw(" quit"),
         ]),
     ])
@@ -448,110 +518,65 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     f.render_stateful_widget(todos_list, chunks[2], &mut list_state);
 
-    // Planka setup OR Project input OR Search input
-    if matches!(app.input_mode, InputMode::EditingPlanka) {
-        let title = match app.planka_setup {
-            Some(crate::app::PlankaSetupStep::Url) => "Planka URL",
-            Some(crate::app::PlankaSetupStep::Username) => "Planka Username or Email",
-            Some(crate::app::PlankaSetupStep::Password) => "Planka Password",
-            _ => "Planka Setup",
-        };
-        let style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
+    // Optional single-line input at bottom (only when editing)
+    if needs_input {
+        let last = chunks.len() - 1;
         let caret = "|";
-        let text = if app.input_planka.is_empty() {
-            caret.to_string()
-        } else {
-            format!("{}{}", app.input_planka, caret)
-        };
-        let widget = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(title))
-            .style(style)
-            .wrap(Wrap { trim: true });
-        f.render_widget(widget, chunks[3]);
-    } else if matches!(app.input_mode, InputMode::EditingProject) {
-        let project_style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let caret = "|";
-        let project_with_caret = if app.input_project.is_empty() {
-            caret.to_string()
-        } else {
-            format!("{}{}", app.input_project, caret)
-        };
-        let project_input = Paragraph::new(project_with_caret)
-            .block(Block::default().borders(Borders::ALL).title("Project"))
-            .style(project_style)
-            .wrap(Wrap { trim: true });
-        f.render_widget(project_input, chunks[3]);
-    } else {
-        let search_style = if matches!(app.input_mode, InputMode::Searching) {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        let caret = "|";
-        let search_with_caret = if matches!(app.input_mode, InputMode::Searching) {
-            format!("Search: {}{}", app.search_query, caret)
-        } else if !app.search_query.is_empty() {
-            format!("Search: {}", app.search_query)
-        } else {
-            "".to_string()
-        };
-        let search_input = Paragraph::new(search_with_caret)
-            .block(Block::default().borders(Borders::ALL).title("Search"))
-            .style(search_style)
-            .wrap(Wrap { trim: true });
-        f.render_widget(search_input, chunks[3]);
+        if matches!(app.input_mode, InputMode::EditingPlanka) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_planka.is_empty() { caret.to_string() } else { format!("{}{}", app.input_planka, caret) };
+            let title = match app.planka_setup {
+                Some(crate::app::PlankaSetupStep::Url) => "Planka URL",
+                Some(crate::app::PlankaSetupStep::Username) => "Planka Username or Email",
+                Some(crate::app::PlankaSetupStep::Password) => "Planka Password",
+                _ => "Planka Setup",
+            };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title(title))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::EditingProject) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_project.is_empty() { caret.to_string() } else { format!("{}{}", app.input_project, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Project"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::EditingDescription) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_description.is_empty() { caret.to_string() } else { format!("{}{}", app.input_description, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Description"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::EditingDueDate) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_due_date.is_empty() { caret.to_string() } else { format!("{}{}", app.input_due_date, caret) };
+            let widget = Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Due") // shortened title
+                )
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        }
     }
 
-    let caret = "|";
-    // Description and due date input fields (unchanged)
-    let description_style = if matches!(app.input_mode, InputMode::EditingDescription) {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    let due_date_style = if matches!(app.input_mode, InputMode::EditingDueDate) {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    let desc_with_caret = if matches!(app.input_mode, InputMode::EditingDescription) {
-        format!("{}{}", app.input_description, caret)
-    } else {
-        app.input_description.clone()
-    };
-    let due_with_caret = if matches!(app.input_mode, InputMode::EditingDueDate) {
-        if app.input_due_date.is_empty() {
-            caret.to_string()
-        } else {
-            format!("{}{}", app.input_due_date, caret)
-        }
-    } else {
-        app.input_due_date.clone()
-    };
-    let input_desc = Paragraph::new(desc_with_caret)
-        .block(Block::default().borders(Borders::ALL).title("Description"))
-        .style(description_style)
-        .wrap(Wrap { trim: true });
-    let input_due = Paragraph::new(due_with_caret)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Due Date (flexible format)"),
-        )
-        .style(due_date_style)
-        .wrap(Wrap { trim: true });
-    f.render_widget(input_desc, chunks[4]);
-    f.render_widget(input_due, chunks[5]);
+    if matches!(app.input_mode, InputMode::Searching) {
+        let popup = centered_rect(60, 25, size);
+        let caret = "|";
+        let text = format!("Search: {}{}", app.search_query, caret);
+        let widget = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title("Search"))
+            .wrap(Wrap { trim: true });
+        f.render_widget(widget, popup);
+    }
+
 
     // Show error message if any
     if let Some(ref msg) = app.error_message {

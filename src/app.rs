@@ -63,6 +63,7 @@ pub enum InputMode {
     Searching,      // search mode
     EditingProject, // project name editing
     EditingPlanka,  // Planka setup flow
+    ControlCenter,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,6 +105,8 @@ pub struct App {
     pub pending_ops: Vec<PendingOp>,
     #[serde(skip)]
     pub inbound_rx: Option<Receiver<Delta>>,
+    #[serde(skip)]
+    pub control_center_index: usize,
     #[serde(skip)]
     pub editing_index: Option<usize>,
 }
@@ -224,6 +227,7 @@ impl App {
             planka_setup: None,
             pending_ops: Self::load_pending_ops(),
             inbound_rx: None,
+            control_center_index: 0,
             editing_index: None,
         }
     }
