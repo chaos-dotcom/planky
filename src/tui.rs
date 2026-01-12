@@ -19,25 +19,6 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use textwrap::wrap;
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    let v = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-    let h = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(v[1]);
-    h[1]
-}
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
 where
@@ -385,6 +366,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::EditingDueDate
             | InputMode::EditingProject
             | InputMode::EditingPlanka
+            | InputMode::Searching
     );
     if needs_input {
         constraints.push(Constraint::Length(3)); // one input line only
@@ -557,18 +539,17 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::Searching) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.search_query.is_empty() { caret.to_string() } else { format!("{}{}", app.search_query, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Search"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
         }
     }
 
-    if matches!(app.input_mode, InputMode::Searching) {
-        let popup = centered_rect(60, 25, size);
-        let caret = "|";
-        let text = format!("Search: {}{}", app.search_query, caret);
-        let widget = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Search"))
-            .wrap(Wrap { trim: true });
-        f.render_widget(widget, popup);
-    }
 
 
     // Show error message if any
