@@ -357,22 +357,31 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let todos: Vec<ListItem> = filtered_todos(app)
         .iter()
         .map(|t| {
-            let status = if t.done { "[x]" } else { "[ ]" };
             let due_opt = t.due_date.as_ref();
+            let is_doing = !t.done
+                && app
+                    .planka_lists_by_board
+                    .get(&app.current_project)
+                    .map(|lists| t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str()))
+                    .unwrap_or(false);
+
+            let status = if t.done {
+                "[x]"
+            } else if is_doing {
+                "[w]"
+            } else {
+                "[ ]"
+            };
+
             let mut desc_color = if t.done {
                 Color::Green
+            } else if is_doing {
+                Color::Cyan
             } else if due_opt.map(|s| is_overdue(s)).unwrap_or(false) {
                 Color::Red
             } else {
                 Color::Yellow
             };
-            if !t.done {
-                if let Some(lists) = app.planka_lists_by_board.get(&app.current_project) {
-                    if t.planka_list_id.as_deref() == Some(lists.doing_list_id.as_str()) {
-                        desc_color = Color::Cyan;
-                    }
-                }
-            }
             // Build a single visible string, then soft-wrap to list width
             let mut text = format!("{} {}", status, t.description);
             if let Some(due) = due_opt {
