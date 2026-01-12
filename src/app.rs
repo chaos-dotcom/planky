@@ -339,6 +339,9 @@ impl App {
                     t.description = name;
                     t.done = done;
                     t.due_date = due.as_deref().and_then(|s| format_planka_due(s));
+                    if let Some(c) = created.as_deref() {
+                        t.created_date = format_planka_created(c);
+                    }
                     t.planka_list_id = Some(list_id.clone());
                 } else {
                     self.todos.push(Todo {
@@ -534,6 +537,9 @@ impl App {
                                         .due
                                         .as_deref()
                                         .and_then(|s| format_planka_due(s));
+                                    if let Some(ref s) = card.created {
+                                        t.created_date = format_planka_created(s);
+                                    }
                                     t.planka_list_id = Some(list_id.clone());
                                     t.planka_board_id = Some(lists.board_id.clone());
                                 }
@@ -643,6 +649,9 @@ impl App {
                             .due
                             .as_deref()
                             .and_then(|s| format_planka_due(s));
+                        if let Some(ref s) = rcard.created {
+                            t.created_date = format_planka_created(s);
+                        }
                         t.planka_list_id = Some(rlist.clone());
                         t.planka_board_id = Some(lists.board_id.clone());
                     }
