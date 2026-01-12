@@ -194,7 +194,7 @@ impl PlankaClient {
         let base = self.base_url.trim_end_matches('/');
         let auth = self.auth_header();
         // 1) Get all projects
-        let projects_url = format!("{}/api/projects", base);
+        let projects_url = format!("{}/api/projects?include=boards", base);
         #[cfg(debug_assertions)]
         log_http_request(
             "GET",
