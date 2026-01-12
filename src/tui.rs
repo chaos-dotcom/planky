@@ -342,9 +342,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .map(|s| s.to_string());
 
     let mut title_text = if let Some(pn) = project_name {
-        format!("Planky - {} - {}", pn, board_name)
+        format!("🌈{} - {}🥰", pn, board_name)
     } else {
-        format!("Planky - {}", board_name)
+        format!("🌈{}🥰", board_name)
     };
     if app.pending_ops_len() > 0 {
         title_text = format!("{}🏴‍☠️ ⇅{}", title_text, app.pending_ops_len());
