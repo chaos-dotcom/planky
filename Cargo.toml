@@ -5,10 +5,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A TUI based todo app written in Rust with search and cross platoform notification support"
 readme = "README.md"
-repository = "https://github.com/KushalMeghani1644/Planky.git"
+repository = "https://github.com/chaos-dotcom/Planky.git"
 keywords = ["todo", "tui", "cli", "rust"]
 categories = ["command-line-utilities"]
-homepage = "https://github.com/KushalMeghani1644/Planky.git"
+homepage = "https://github.com/chaos-dotcom/Planky.git"
 [dependencies]
 directories = "6.0"
 ratatui = "0.30"
