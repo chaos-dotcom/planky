@@ -143,6 +143,21 @@ pub fn save_config(cfg: &PlankaConfig) -> Result<(), String> {
         .map_err(|e| format!("Write planka config failed: {}", e))
 }
 
+#[derive(serde::Deserialize)]
+struct CardDetailsRes {
+    item: CardDetailsItem,
+}
+
+#[derive(serde::Deserialize)]
+struct CardDetailsItem {
+    #[serde(rename = "id")]
+    id: String,
+    #[serde(rename = "createdAt")]
+    created_at: Option<String>,
+    #[serde(rename = "dueDate")]
+    due_date: Option<String>,
+}
+
 pub struct PlankaClient {
     pub base_url: String,
     pub client: Client,
@@ -664,6 +679,41 @@ impl PlankaClient {
         Ok(())
     }
 
+    pub fn fetch_card_created(&self, card_id: &str) -> Result<Option<String>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}", base, card_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "GET",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status().as_u16();
+        let body = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status, &body);
+        if status != 200 {
+            return Ok(None);
+        }
+        let parsed: CardDetailsRes =
+            serde_json::from_str(&body).map_err(|e| format!("Parse card details failed: {}", e))?;
+        Ok(parsed.item.created_at)
+    }
+
     pub fn fetch_cards(&self, list_id: &str) -> Result<Vec<PlankaCard>, String> {
         let base = self.base_url.trim_end_matches('/');
         let auth = self.auth_header();
@@ -707,6 +757,14 @@ impl PlankaClient {
                                 let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
                                 let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
                                 out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due, created });
+                            }
+                        }
+                        // Enrich created from card details if missing
+                        for c in &mut out {
+                            if c.created.is_none() {
+                                if let Ok(created) = self.fetch_card_created(&c.id) {
+                                    c.created = created;
+                                }
                             }
                         }
                         return Ok(out);
@@ -764,6 +822,14 @@ impl PlankaClient {
                     let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
                     let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
                     out.push(PlankaCard { id: id.to_string(), name: name.to_string(), due, created });
+                }
+            }
+        }
+        // Enrich created from card details if missing
+        for c in &mut out {
+            if c.created.is_none() {
+                if let Ok(created) = self.fetch_card_created(&c.id) {
+                    c.created = created;
                 }
             }
         }
