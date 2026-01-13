@@ -1444,7 +1444,7 @@ impl PlankaClient {
 
     pub fn add_member_to_card(&self, card_id: &str, user_id: &str) -> Result<(), String> {
         let base = self.base_url.trim_end_matches('/');
-        the url = format!("{}/api/cards/{}/card-memberships", base, card_id);
+        let url = format!("{}/api/cards/{}/card-memberships", base, card_id);
         let auth = self.auth_header();
         let body = json!({ "userId": user_id });
         #[cfg(debug_assertions)]
