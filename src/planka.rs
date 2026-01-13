@@ -1750,6 +1750,402 @@ impl PlankaClient {
         if !status.is_success() { return Err(format!("Delete task list failed: HTTP {} - {}", status, text)); }
         Ok(())
     }
+
+    pub fn update_board(
+        &self,
+        board_id: &str,
+        position: Option<i64>,
+        name: Option<&str>,
+        default_view: Option<&str>,               // "kanban" | "grid" | "list"
+        default_card_type: Option<&str>,          // "project" | "story"
+        limit_card_types_to_default_one: Option<bool>,
+        always_display_card_creator: Option<bool>,
+        expand_task_lists_by_default: Option<bool>,
+        is_subscribed: Option<bool>,
+    ) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}", base, board_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(v) = position { body.insert("position".to_string(), Value::from(v)); }
+        if let Some(v) = name { body.insert("name".to_string(), Value::String(v.to_string())); }
+        if let Some(v) = default_view { body.insert("defaultView".to_string(), Value::String(v.to_string())); }
+        if let Some(v) = default_card_type { body.insert("defaultCardType".to_string(), Value::String(v.to_string())); }
+        if let Some(v) = limit_card_types_to_default_one { body.insert("limitCardTypesToDefaultOne".to_string(), Value::Bool(v)); }
+        if let Some(v) = always_display_card_creator { body.insert("alwaysDisplayCardCreator".to_string(), Value::Bool(v)); }
+        if let Some(v) = expand_task_lists_by_default { body.insert("expandTaskListsByDefault".to_string(), Value::Bool(v)); }
+        if let Some(v) = is_subscribed { body.insert("isSubscribed".to_string(), Value::Bool(v)); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update board failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_board(&self, board_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}", base, board_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete board failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_board_details(&self, board_id: &str) -> Result<PlankaBoardDetails, String> {
+        let base = self.base_url.trim_end_matches('/');
+        // include lists and labels explicitly
+        let url = format!("{}/api/boards/{}?include=lists,labels", base, board_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch board failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse board failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object()).ok_or_else(|| "Missing item".to_string())?;
+        let id = item.get("id").and_then(|x| x.as_str()).unwrap_or(board_id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).or_else(|| item.get("title").and_then(|x| x.as_str())).unwrap_or("").to_string();
+        let project_id = item.get("projectId").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let mut lists = Vec::new();
+        let mut labels = Vec::new();
+        if let Some(inc) = v.get("included").and_then(|x| x.as_object()) {
+            if let Some(arr) = inc.get("lists").and_then(|x| x.as_array()) {
+                for l in arr {
+                    if let (Some(lid), Some(nm)) = (l.get("id").and_then(|x| x.as_str()), l.get("name").and_then(|x| x.as_str()).or_else(|| l.get("title").and_then(|x| x.as_str()))) {
+                        lists.push((lid.to_string(), nm.to_string()));
+                    }
+                }
+            }
+            if let Some(arr) = inc.get("labels").and_then(|x| x.as_array()) {
+                for lab in arr {
+                    let lid = lab.get("id").and_then(|x| x.as_str());
+                    let nm = lab.get("name").and_then(|x| x.as_str()).or_else(|| lab.get("title").and_then(|x| x.as_str()));
+                    let color = lab.get("color").and_then(|x| x.as_str());
+                    if let (Some(lid), Some(nm), Some(color)) = (lid, nm, color) {
+                        labels.push((lid.to_string(), nm.to_string(), color.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(PlankaBoardDetails { id, name, project_id, lists, labels })
+    }
+
+    pub fn create_board_membership(&self, board_id: &str, user_id: &str, role: &str, can_comment: Option<bool>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}/board-memberships", base, board_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("userId".to_string(), Value::String(user_id.to_string()));
+        body.insert("role".to_string(), Value::String(role.to_string())); // "editor" | "viewer"
+        if let Some(v) = can_comment { body.insert("canComment".to_string(), Value::Bool(v)); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create board membership failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create board membership failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn update_board_membership(&self, membership_id: &str, role: Option<&str>, can_comment: Option<bool>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/board-memberships/{}", base, membership_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(r) = role { body.insert("role".to_string(), Value::String(r.to_string())); }
+        if let Some(c) = can_comment { body.insert("canComment".to_string(), Value::Bool(c)); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update board membership failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_board_membership(&self, membership_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/board-memberships/{}", base, membership_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete board membership failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_label(&self, board_id: &str, color: &str, name: Option<&str>, position: Option<i64>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}/labels", base, board_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("color".to_string(), Value::String(color.to_string()));
+        body.insert("position".to_string(), Value::from(position.unwrap_or(65536)));
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create label failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create label failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn update_label(&self, label_id: &str, position: Option<i64>, name: Option<&str>, color: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/labels/{}", base, label_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(p) = position { body.insert("position".to_string(), Value::from(p)); }
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(c) = color { body.insert("color".to_string(), Value::String(c.to_string())); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update label failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_label(&self, label_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/labels/{}", base, label_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete label failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn clear_list(&self, list_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}/clear", base, list_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some("{}"));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&json!({}))
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Clear list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_list(&self, board_id: &str, name: &str, list_type: Option<&str>, position: Option<i64>, color: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}/lists", base, board_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("type".to_string(), Value::String(list_type.unwrap_or("active").to_string()));
+        body.insert("position".to_string(), Value::from(position.unwrap_or(65536)));
+        body.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(c) = color { body.insert("color".to_string(), Value::String(c.to_string())); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create list failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create list failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn fetch_list_details(&self, list_id: &str) -> Result<PlankaListDetails, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}", base, list_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch list failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse list failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object()).ok_or_else(|| "Missing item".to_string())?;
+        let id = item.get("id").and_then(|x| x.as_str()).unwrap_or(list_id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).or_else(|| item.get("title").and_then(|x| x.as_str())).unwrap_or("").to_string();
+        let mut cards = Vec::new();
+        if let Some(arr) = v.get("included").and_then(|i| i.get("cards")).and_then(|x| x.as_array()) {
+            for c in arr {
+                if let (Some(cid), Some(nm)) = (c.get("id").and_then(|x| x.as_str()), c.get("name").and_then(|x| x.as_str())) {
+                    let due = c.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    cards.push(PlankaCard { id: cid.to_string(), name: nm.to_string(), due, created });
+                }
+            }
+        }
+        Ok(PlankaListDetails { id, name, cards })
+    }
+
+    pub fn update_list(&self, list_id: &str, board_id: Option<&str>, list_type: Option<&str>, position: Option<i64>, name: Option<&str>, color: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}", base, list_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(b) = board_id { body.insert("boardId".to_string(), Value::String(b.to_string())); }
+        if let Some(t) = list_type { body.insert("type".to_string(), Value::String(t.to_string())); }
+        if let Some(p) = position { body.insert("position".to_string(), Value::from(p)); }
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(c) = color { body.insert("color".to_string(), Value::String(c.to_string())); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_list(&self, list_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}", base, list_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn move_list_cards(&self, source_list_id: &str, target_list_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}/move-cards", base, source_list_id);
+        let auth = self.auth_header();
+        let body = json!({ "listId": target_list_id });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Move list cards failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn sort_list(&self, list_id: &str, field_name: &str, order: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/lists/{}/sort", base, list_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("fieldName".to_string(), Value::String(field_name.to_string())); // "name" | "dueDate" | "createdAt"
+        if let Some(o) = order { body.insert("order".to_string(), Value::String(o.to_string())); } // "asc" | "desc"
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Sort list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
 }
 
 // POST /api/access-tokens
@@ -1910,4 +2306,20 @@ pub struct PlankaTaskListDetails {
     pub id: String,
     pub name: String,
     pub tasks: Vec<PlankaTask>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaBoardDetails {
+    pub id: String,
+    pub name: String,
+    pub project_id: Option<String>,
+    pub lists: Vec<(String, String)>,   // (id, name)
+    pub labels: Vec<(String, String, String)>, // (id, name, color)
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaListDetails {
+    pub id: String,
+    pub name: String,
+    pub cards: Vec<PlankaCard>,
 }
