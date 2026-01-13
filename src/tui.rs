@@ -660,7 +660,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 Constraint::Length(1),  // tabs
                 Constraint::Length(6),  // banner
                 Constraint::Min(8),     // main
-                Constraint::Length(1),  // footer help
+                Constraint::Length(2),  // footer help (wrapped into 2 lines)
             ])
             .split(area);
 
@@ -845,17 +845,22 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             f.render_widget(comments, main_rows[1]);
 
             // Footer help (bracketed keys)
-            let help = Paragraph::new(Line::from(vec![
-                Span::raw("[Esc] Close  "),
-                Span::raw("[↑/↓/PgUp/PgDn] Scroll  "),
-                Span::raw("[c] Comment  [r] Reply  [e] Edit  [x] Del cmnt  "),
-                Span::raw("[a] Attach  [F] File  [R] Ren  [z] Del  "),
-                Span::raw("[t] Add CB  [o] Toggle  [k] Del CB  "),
-                Span::raw("[Y] Dup  [N] Read  "),
-                Span::raw("[1-9] Sel CFG  [g] Card CFG  [G] Board CFG  "),
-                Span::raw("[f] Field  [v] Value  [X] Del Val  [h] Ren CFG  [D] Del CFG"),
-            ]))
-            .alignment(Alignment::Center);
+            let help_lines = vec![
+                Line::from(vec![
+                    Span::raw("[Esc] Close  "),
+                    Span::raw("[↑/↓/PgUp/PgDn] Scroll  "),
+                    Span::raw("[c] Comment  [r] Reply  [e] Edit  [x] Del cmnt  "),
+                    Span::raw("[t] Add CB  [o] Toggle  [k] Del CB  "),
+                ]),
+                Line::from(vec![
+                    // file/attachment commands moved to this second (bottom) row
+                    Span::raw("[a] Link Attach  [F] File Attach  [R] Ren Attach  [z] Del Attach  "),
+                    Span::raw("[Y] Duplicate  [N] Read Notifs  "),
+                    Span::raw("[1-9] Sel CFG  [g] Card CFG  [G] Board CFG  "),
+                    Span::raw("[f] Field  [v] Value  [X] Del Val  [h] Ren CFG  [D] Del CFG"),
+                ]),
+            ];
+            let help = Paragraph::new(help_lines).alignment(Alignment::Center);
             f.render_widget(help, rows[3]);
         } else {
             let empty = Paragraph::new("No card loaded")
