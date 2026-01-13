@@ -688,10 +688,6 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     format!("  {}", d.name),
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 )),
-                Line::from(Span::styled(
-                    "Card Details Viewer",
-                    Style::default().fg(Color::Yellow),
-                )),
                 Line::from(""),
                 Line::from(Span::styled(
                     format!("  {}", path),
