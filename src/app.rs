@@ -1620,10 +1620,10 @@ impl App {
     pub fn submit_rename_attachment(&mut self) -> Result<(), String> {
         let name = self.input_attachment_name.trim().to_string();
         if name.is_empty() { return Err("Attachment name cannot be empty.".into()); }
-        let (att_id, card_id) = match self.view_card.as_ref() {
+        let att_id = match self.view_card.as_ref() {
             Some(vc) => {
                 let last = vc.attachments_full.last().ok_or("No attachments on this card")?;
-                (last.id.clone(), vc.id.clone())
+                last.id.clone()
             }
             None => return Err("No card open".into()),
         };
@@ -1686,14 +1686,14 @@ impl App {
         self.error_message = None;
     }
     pub fn submit_create_card_cfg(&mut self) -> Result<(), String> {
-        let name = self.input_cfg_group_name.trim();
+        let name = self.input_cfg_group_name.trim().to_string();
         if name.is_empty() { return Err("Group name cannot be empty.".into()); }
-        let (card_id) = match self.view_card.as_ref() {
-            Some(c) => (c.id.clone()),
+        let card_id = match self.view_card.as_ref() {
+            Some(c) => c.id.clone(),
             None => return Err("No card open".into()),
         };
         let client = self.ensure_planka_client()?;
-        let _gid = client.create_card_custom_field_group(&card_id, 65536, Some(name), None)?;
+        let _gid = client.create_card_custom_field_group(&card_id, 65536, Some(&name), None)?;
         self.input_cfg_group_name.clear();
         self.input_mode = InputMode::ViewingCard;
         self.refresh_open_card_details();
@@ -1706,14 +1706,14 @@ impl App {
         self.error_message = None;
     }
     pub fn submit_create_board_cfg(&mut self) -> Result<(), String> {
-        let name = self.input_cfg_group_name.trim();
+        let name = self.input_cfg_group_name.trim().to_string();
         if name.is_empty() { return Err("Group name cannot be empty.".into()); }
-        let (board_id) = match self.view_card.as_ref().and_then(|c| c.board_id.clone()) {
+        let board_id = match self.view_card.as_ref().and_then(|c| c.board_id.clone()) {
             Some(b) => b,
             None => return Err("Board id not available".into()),
         };
         let client = self.ensure_planka_client()?;
-        let _gid = client.create_board_custom_field_group(&board_id, 65536, Some(name), None)?;
+        let _gid = client.create_board_custom_field_group(&board_id, 65536, Some(&name), None)?;
         self.input_cfg_group_name.clear();
         self.input_mode = InputMode::ViewingCard;
         self.refresh_open_card_details();
@@ -1730,11 +1730,11 @@ impl App {
         self.error_message = None;
     }
     pub fn submit_create_custom_field(&mut self) -> Result<(), String> {
-        let name = self.input_custom_field_name.trim();
+        let name = self.input_custom_field_name.trim().to_string();
         if name.is_empty() { return Err("Field name cannot be empty.".into()); }
         let gid = self.selected_group_id().ok_or("No group selected")?;
         let client = self.ensure_planka_client()?;
-        let _fid = client.create_custom_field_in_group(&gid, 65536, name, Some(true))?;
+        let _fid = client.create_custom_field_in_group(&gid, 65536, &name, Some(true))?;
         self.input_custom_field_name.clear();
         self.input_mode = InputMode::ViewingCard;
         self.refresh_open_card_details();
