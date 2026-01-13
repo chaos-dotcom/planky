@@ -74,6 +74,11 @@ pub enum InputMode {
     UploadingFileAttachment,
     RenamingAttachment,
     DuplicatingCard,
+    CreatingCardCustomFieldGroup,
+    CreatingBoardCustomFieldGroup,
+    CreatingCustomField,
+    EditingCustomFieldValue,
+    RenamingCustomFieldGroup,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,6 +149,14 @@ pub struct App {
     pub input_duplicate_name: String,
     #[serde(skip)]
     pub view_scroll: u16,
+    #[serde(skip)]
+    pub selected_custom_group_index: usize,
+    #[serde(skip)]
+    pub input_cfg_group_name: String,
+    #[serde(skip)]
+    pub input_custom_field_name: String,
+    #[serde(skip)]
+    pub input_custom_field_value: String,
 }
 
 impl Default for InputMode {
@@ -242,6 +255,16 @@ impl App {
 
         ordered.get(self.selected).copied()
     }
+    fn selected_group_id(&self) -> Option<String> {
+        let vc = self.view_card.as_ref()?;
+        vc.custom_field_groups.get(self.selected_custom_group_index).map(|g| g.id.clone())
+    }
+    fn selected_group_last_field(&self) -> Option<(String, String)> { // (group_id, field_id)
+        let vc = self.view_card.as_ref()?;
+        let g = vc.custom_field_groups.get(self.selected_custom_group_index)?;
+        let fid = g.fields.last()?.id.clone();
+        Some((g.id.clone(), fid))
+    }
     pub fn new() -> Self {
         Self {
             todos: Vec::new(),
@@ -276,6 +299,10 @@ impl App {
             input_attachment_name: String::new(),
             input_duplicate_name: String::new(),
             view_scroll: 0,
+            selected_custom_group_index: 0,
+            input_cfg_group_name: String::new(),
+            input_custom_field_name: String::new(),
+            input_custom_field_value: String::new(),
         }
     }
 
@@ -1647,6 +1674,159 @@ impl App {
                     self.error_message = Some(e);
                 } else {
                     self.error_message = Some("Card notifications marked as read".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn begin_create_card_cfg(&mut self) {
+        self.input_cfg_group_name.clear();
+        self.input_mode = InputMode::CreatingCardCustomFieldGroup;
+        self.error_message = None;
+    }
+    pub fn submit_create_card_cfg(&mut self) -> Result<(), String> {
+        let name = self.input_cfg_group_name.trim();
+        if name.is_empty() { return Err("Group name cannot be empty.".into()); }
+        let (card_id) = match self.view_card.as_ref() {
+            Some(c) => (c.id.clone()),
+            None => return Err("No card open".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        let _gid = client.create_card_custom_field_group(&card_id, 65536, Some(name), None)?;
+        self.input_cfg_group_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Card custom field group created".into());
+        Ok(())
+    }
+    pub fn begin_create_board_cfg(&mut self) {
+        self.input_cfg_group_name.clear();
+        self.input_mode = InputMode::CreatingBoardCustomFieldGroup;
+        self.error_message = None;
+    }
+    pub fn submit_create_board_cfg(&mut self) -> Result<(), String> {
+        let name = self.input_cfg_group_name.trim();
+        if name.is_empty() { return Err("Group name cannot be empty.".into()); }
+        let (board_id) = match self.view_card.as_ref().and_then(|c| c.board_id.clone()) {
+            Some(b) => b,
+            None => return Err("Board id not available".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        let _gid = client.create_board_custom_field_group(&board_id, 65536, Some(name), None)?;
+        self.input_cfg_group_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Board custom field group created".into());
+        Ok(())
+    }
+    pub fn begin_create_custom_field(&mut self) {
+        if self.selected_group_id().is_none() {
+            self.error_message = Some("Select a custom field group first (1..9)".into());
+            return;
+        }
+        self.input_custom_field_name.clear();
+        self.input_mode = InputMode::CreatingCustomField;
+        self.error_message = None;
+    }
+    pub fn submit_create_custom_field(&mut self) -> Result<(), String> {
+        let name = self.input_custom_field_name.trim();
+        if name.is_empty() { return Err("Field name cannot be empty.".into()); }
+        let gid = self.selected_group_id().ok_or("No group selected")?;
+        let client = self.ensure_planka_client()?;
+        let _fid = client.create_custom_field_in_group(&gid, 65536, name, Some(true))?;
+        self.input_custom_field_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Custom field created".into());
+        Ok(())
+    }
+    pub fn begin_edit_custom_field_value(&mut self) {
+        if let Some((gid, fid)) = self.selected_group_last_field() {
+            // prefill with current value if present
+            if let Some(vc) = self.view_card.as_ref() {
+                if let Some(g) = vc.custom_field_groups.get(self.selected_custom_group_index) {
+                    if let Some(v) = g.values_by_field.get(&fid) {
+                        self.input_custom_field_value = v.clone();
+                    } else {
+                        self.input_custom_field_value.clear();
+                    }
+                }
+            }
+            self.input_mode = InputMode::EditingCustomFieldValue;
+            self.error_message = None;
+            let _ = gid; // silence unused in case of cfg differences
+        } else {
+            self.error_message = Some("No fields in selected group".into());
+        }
+    }
+    pub fn submit_edit_custom_field_value(&mut self) -> Result<(), String> {
+        let content = self.input_custom_field_value.trim().to_string();
+        let (card_id, (gid, fid)) = match (self.view_card.as_ref(), self.selected_group_last_field()) {
+            (Some(c), Some(t)) => (c.id.clone(), t),
+            _ => return Err("No card/group/field selected".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        client.update_custom_field_value(&card_id, &gid, &fid, &content)?;
+        self.input_custom_field_value.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Field value updated".into());
+        Ok(())
+    }
+    pub fn delete_last_custom_field_value(&mut self) {
+        let (card_id, (gid, fid)) = match (self.view_card.as_ref(), self.selected_group_last_field()) {
+            (Some(c), Some(t)) => (c.id.clone(), t),
+            _ => { self.error_message = Some("No card/group/field selected".into()); return; }
+        };
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.delete_custom_field_value(&card_id, &gid, &fid) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                    self.error_message = Some("Field value deleted".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+    pub fn begin_rename_custom_field_group(&mut self) {
+        if let Some(vc) = self.view_card.as_ref() {
+            if let Some(g) = vc.custom_field_groups.get(self.selected_custom_group_index) {
+                self.input_cfg_group_name = g.name.clone().unwrap_or_default();
+                self.input_mode = InputMode::RenamingCustomFieldGroup;
+                self.error_message = None;
+                return;
+            }
+        }
+        self.error_message = Some("No custom field group".into());
+    }
+    pub fn submit_rename_custom_field_group(&mut self) -> Result<(), String> {
+        let name = self.input_cfg_group_name.trim().to_string();
+        if name.is_empty() { return Err("Group name cannot be empty.".into()); }
+        let gid = self.selected_group_id().ok_or("No group selected")?;
+        let client = self.ensure_planka_client()?;
+        client.update_custom_field_group(&gid, None, Some(&name))?;
+        self.input_cfg_group_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Group renamed".into());
+        Ok(())
+    }
+    pub fn delete_selected_custom_field_group(&mut self) {
+        let gid = match self.selected_group_id() {
+            Some(g) => g,
+            None => { self.error_message = Some("No group selected".into()); return; }
+        };
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.delete_custom_field_group(&gid) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                    self.selected_custom_group_index = 0;
+                    self.error_message = Some("Group deleted".into());
                 }
             }
             Err(e) => self.error_message = Some(e),

@@ -338,6 +338,35 @@ where
                         KeyCode::Char('k') => {
                             app.delete_last_task();
                         }
+                        KeyCode::Char('g') => { // create card-level custom field group
+                            app.begin_create_card_cfg();
+                        }
+                        KeyCode::Char('G') => { // create board-level custom field group
+                            app.begin_create_board_cfg();
+                        }
+                        KeyCode::Char('f') => { // add custom field to selected group
+                            app.begin_create_custom_field();
+                        }
+                        KeyCode::Char('v') => { // edit value of last field in selected group
+                            app.begin_edit_custom_field_value();
+                        }
+                        KeyCode::Char('X') => { // delete value of last field
+                            app.delete_last_custom_field_value();
+                        }
+                        KeyCode::Char('h') => { // rename selected group
+                            app.begin_rename_custom_field_group();
+                        }
+                        KeyCode::Char('D') => { // delete selected group
+                            app.delete_selected_custom_field_group();
+                        }
+                        KeyCode::Char(c) if c >= '1' && c <= '9' => {
+                            let idx = (c as u8 - b'1') as usize;
+                            if let Some(vc) = app.view_card.as_ref() {
+                                if idx < vc.custom_field_groups.len() {
+                                    app.selected_custom_group_index = idx;
+                                }
+                            }
+                        }
                         _ => {}
                     },
                     InputMode::CreatingComment => {
@@ -477,6 +506,41 @@ where
                         }
                         KeyCode::Char(c) => app.input_checklist.push(c),
                         KeyCode::Backspace => { app.input_checklist.pop(); }
+                        _ => {}
+                    },
+                    InputMode::CreatingCardCustomFieldGroup => match key.code {
+                        KeyCode::Enter => { if let Err(e) = app.submit_create_card_cfg() { app.error_message = Some(e); } }
+                        KeyCode::Esc => { app.input_mode = InputMode::ViewingCard; app.input_cfg_group_name.clear(); }
+                        KeyCode::Char(c) => app.input_cfg_group_name.push(c),
+                        KeyCode::Backspace => { app.input_cfg_group_name.pop(); }
+                        _ => {}
+                    },
+                    InputMode::CreatingBoardCustomFieldGroup => match key.code {
+                        KeyCode::Enter => { if let Err(e) = app.submit_create_board_cfg() { app.error_message = Some(e); } }
+                        KeyCode::Esc => { app.input_mode = InputMode::ViewingCard; app.input_cfg_group_name.clear(); }
+                        KeyCode::Char(c) => app.input_cfg_group_name.push(c),
+                        KeyCode::Backspace => { app.input_cfg_group_name.pop(); }
+                        _ => {}
+                    },
+                    InputMode::CreatingCustomField => match key.code {
+                        KeyCode::Enter => { if let Err(e) = app.submit_create_custom_field() { app.error_message = Some(e); } }
+                        KeyCode::Esc => { app.input_mode = InputMode::ViewingCard; app.input_custom_field_name.clear(); }
+                        KeyCode::Char(c) => app.input_custom_field_name.push(c),
+                        KeyCode::Backspace => { app.input_custom_field_name.pop(); }
+                        _ => {}
+                    },
+                    InputMode::EditingCustomFieldValue => match key.code {
+                        KeyCode::Enter => { if let Err(e) = app.submit_edit_custom_field_value() { app.error_message = Some(e); } }
+                        KeyCode::Esc => { app.input_mode = InputMode::ViewingCard; app.input_custom_field_value.clear(); }
+                        KeyCode::Char(c) => app.input_custom_field_value.push(c),
+                        KeyCode::Backspace => { app.input_custom_field_value.pop(); }
+                        _ => {}
+                    },
+                    InputMode::RenamingCustomFieldGroup => match key.code {
+                        KeyCode::Enter => { if let Err(e) = app.submit_rename_custom_field_group() { app.error_message = Some(e); } }
+                        KeyCode::Esc => { app.input_mode = InputMode::ViewingCard; app.input_cfg_group_name.clear(); }
+                        KeyCode::Char(c) => app.input_cfg_group_name.push(c),
+                        KeyCode::Backspace => { app.input_cfg_group_name.pop(); }
                         _ => {}
                     },
                     InputMode::ControlCenter => match key.code {
@@ -638,6 +702,20 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     lines.push(Line::from(format!("  {} {}", mark, name)));
                 }
             }
+            // Custom fields
+            if !d.custom_field_groups.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("Custom Fields:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+                for (i, g) in d.custom_field_groups.iter().enumerate() {
+                    let sel = if i == app.selected_custom_group_index { ">>" } else { "  " };
+                    let title = g.name.clone().unwrap_or_else(|| "Unnamed Group".to_string());
+                    lines.push(Line::from(Span::styled(format!("{} [{}] {}", sel, i + 1, title), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+                    for fld in &g.fields {
+                        let val = g.values_by_field.get(&fld.id).cloned().unwrap_or_default();
+                        lines.push(Line::from(Span::styled(format!("    - {}: {}", fld.name, val), Style::default().fg(Color::Green))));
+                    }
+                }
+            }
             if !app.view_comments.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::from("Comments:"));
@@ -664,14 +742,14 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • F file attach • R ren attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox • Y duplicate • N read notifs",
+                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • F file attach • R ren attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox • Y duplicate • N read notifs • 1-9 sel CFG • g add Card CFG • G add Board CFG • f add Field • v set Value • X del Value • h ren CFG • D del CFG",
                 Style::default().fg(Color::Blue),
             )));
         } else {
             lines.push(Line::from("No card loaded"));
         }
 
-        let details = Paragraph::new(lines)
+        let details = Paragraph::new(lines).style(Style::default().fg(Color::Green))
             .block(Block::default().borders(Borders::ALL).title("Card"))
             .wrap(Wrap { trim: true })
             .scroll((app.view_scroll, 0));
@@ -736,6 +814,11 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::RenamingAttachment
             | InputMode::DuplicatingCard
             | InputMode::CreatingChecklistItem
+            | InputMode::CreatingCardCustomFieldGroup
+            | InputMode::CreatingBoardCustomFieldGroup
+            | InputMode::CreatingCustomField
+            | InputMode::EditingCustomFieldValue
+            | InputMode::RenamingCustomFieldGroup
             | InputMode::Searching
     );
     if needs_input {
@@ -996,6 +1079,41 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 .block(Block::default().borders(Borders::ALL).title("Checklist Item"))
                 .style(style)
                 .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingCardCustomFieldGroup) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_cfg_group_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_cfg_group_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("New Card Custom Field Group Name"))
+                .style(style).wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingBoardCustomFieldGroup) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_cfg_group_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_cfg_group_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("New Board Custom Field Group Name"))
+                .style(style).wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingCustomField) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_custom_field_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_custom_field_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("New Custom Field Name"))
+                .style(style).wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::EditingCustomFieldValue) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_custom_field_value.is_empty() { caret.to_string() } else { format!("{}{}", app.input_custom_field_value, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Custom Field Value"))
+                .style(style).wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::RenamingCustomFieldGroup) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_cfg_group_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_cfg_group_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Rename Custom Field Group"))
+                .style(style).wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);
         } else if matches!(app.input_mode, InputMode::Searching) {
             let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);

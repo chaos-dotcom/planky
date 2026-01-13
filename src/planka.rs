@@ -1046,9 +1046,64 @@ impl PlankaClient {
             }
         }
 
+        // custom field groups, fields, values
+        let mut cfg_name_by_id: HashMap<String, Option<String>> = HashMap::new();
+        let mut fields_by_group: HashMap<String, Vec<PlankaCustomField>> = HashMap::new();
+        let mut values_by_group: HashMap<String, HashMap<String, String>> = HashMap::new();
+        if let Some(inc) = included {
+            if let Some(arr) = inc.get("customFieldGroups").and_then(|x| x.as_array()) {
+                for g in arr {
+                    if let Some(gid) = g.get("id").and_then(|x| x.as_str()) {
+                        let name = g.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
+                        cfg_name_by_id.insert(gid.to_string(), name);
+                    }
+                }
+            }
+            if let Some(arr) = inc.get("customFields").and_then(|x| x.as_array()) {
+                for f in arr {
+                    if let (Some(fid), Some(name)) = (
+                        f.get("id").and_then(|x| x.as_str()),
+                        f.get("name").and_then(|x| x.as_str()),
+                    ) {
+                        if let Some(gid) = f.get("customFieldGroupId").and_then(|x| x.as_str()) {
+                            fields_by_group
+                                .entry(gid.to_string())
+                                .or_default()
+                                .push(PlankaCustomField {
+                                    id: fid.to_string(),
+                                    name: name.to_string(),
+                                    show_on_front_of_card: f.get("showOnFrontOfCard").and_then(|x| x.as_bool()),
+                                });
+                        }
+                    }
+                }
+            }
+            if let Some(arr) = inc.get("customFieldValues").and_then(|x| x.as_array()) {
+                for v in arr {
+                    if let (Some(gid), Some(fid), Some(content)) = (
+                        v.get("customFieldGroupId").and_then(|x| x.as_str()),
+                        v.get("customFieldId").and_then(|x| x.as_str()),
+                        v.get("content").and_then(|x| x.as_str()),
+                    ) {
+                        values_by_group
+                            .entry(gid.to_string())
+                            .or_default()
+                            .insert(fid.to_string(), content.to_string());
+                    }
+                }
+            }
+        }
+        let mut custom_field_groups: Vec<PlankaCustomFieldGroupDetails> = Vec::new();
+        for (gid, name) in cfg_name_by_id {
+            let mut fields = fields_by_group.remove(&gid).unwrap_or_default();
+            fields.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            let values = values_by_group.remove(&gid).unwrap_or_default();
+            custom_field_groups.push(PlankaCustomFieldGroupDetails { id: gid, name, fields, values_by_field: values });
+        }
+        custom_field_groups.sort_by(|a, b| a.name.as_deref().unwrap_or("").to_lowercase().cmp(&b.name.as_deref().unwrap_or("").to_lowercase()));
         Ok(PlankaCardDetails {
             id, name, description, due, is_due_completed, created, updated, list_name, labels, attachments, tasks,
-            board_id, attachments_full, tasks_full, task_lists,
+            board_id, attachments_full, tasks_full, task_lists, custom_field_groups,
         })
     }
     pub fn fetch_comments(&self, card_id: &str) -> Result<Vec<PlankaComment>, String> {
@@ -2353,6 +2408,213 @@ impl PlankaClient {
         if !status.is_success() { return Err(format!("Read card notifications failed: HTTP {} - {}", status, text)); }
         Ok(())
     }
+
+    pub fn create_board_custom_field_group(&self, board_id: &str, position: i64, name: Option<&str>, base_custom_field_group_id: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/boards/{}/custom-field-groups", base, board_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("position".to_string(), Value::from(position));
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(bid) = base_custom_field_group_id { body.insert("baseCustomFieldGroupId".to_string(), Value::String(bid.to_string())); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create board custom field group failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create board cfg failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn create_card_custom_field_group(&self, card_id: &str, position: i64, name: Option<&str>, base_custom_field_group_id: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/custom-field-groups", base, card_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("position".to_string(), Value::from(position));
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(bid) = base_custom_field_group_id { body.insert("baseCustomFieldGroupId".to_string(), Value::String(bid.to_string())); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create card custom field group failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create card cfg failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn delete_custom_field_group(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/custom-field-groups/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url).header("Authorization", auth).header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete custom field group failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn get_custom_field_group(&self, id: &str) -> Result<PlankaCustomFieldGroupDetails, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/custom-field-groups/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.get(&url).header("Authorization", auth).header("Accept", "application/json")
+            .send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Get custom field group failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse cfg failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object()).ok_or("Missing item")?;
+        let gid = item.get("id").and_then(|x| x.as_str()).unwrap_or(id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let mut fields: Vec<PlankaCustomField> = Vec::new();
+        let mut values_by_field: HashMap<String, String> = HashMap::new();
+        if let Some(inc) = v.get("included").and_then(|x| x.as_object()) {
+            if let Some(arr) = inc.get("customFields").and_then(|x| x.as_array()) {
+                for f in arr {
+                    if let (Some(fid), Some(nm)) = (f.get("id").and_then(|x| x.as_str()), f.get("name").and_then(|x| x.as_str())) {
+                        fields.push(PlankaCustomField { id: fid.to_string(), name: nm.to_string(), show_on_front_of_card: f.get("showOnFrontOfCard").and_then(|x| x.as_bool()) });
+                    }
+                }
+            }
+            if let Some(arr) = inc.get("customFieldValues").and_then(|x| x.as_array()) {
+                for val in arr {
+                    if let (Some(fid), Some(content)) = (val.get("customFieldId").and_then(|x| x.as_str()), val.get("content").and_then(|x| x.as_str())) {
+                        values_by_field.insert(fid.to_string(), content.to_string());
+                    }
+                }
+            }
+        }
+        Ok(PlankaCustomFieldGroupDetails { id: gid, name, fields, values_by_field })
+    }
+
+    pub fn update_custom_field_group(&self, id: &str, position: Option<i64>, name: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/custom-field-groups/{}", base, id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(p) = position { body.insert("position".to_string(), Value::from(p)); }
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update custom field group failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_custom_field_value(&self, card_id: &str, custom_field_group_id: &str, custom_field_id: &str, content: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/custom-field-values/customFieldGroupId:{}:customFieldId:{}", base, card_id, custom_field_group_id, custom_field_id);
+        let auth = self.auth_header();
+        let body = json!({ "content": content });
+        #[cfg(debug_assertions)] log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update custom field value failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_custom_field_value(&self, card_id: &str, custom_field_group_id: &str, custom_field_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/custom-field-value/customFieldGroupId:{}:customFieldId:{}", base, card_id, custom_field_group_id, custom_field_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete custom field value failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_custom_field_in_base_group(&self, base_custom_field_group_id: &str, position: i64, name: &str, show_on_front_of_card: Option<bool>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/base-custom-field-groups/{}/custom-fields", base, base_custom_field_group_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("position".to_string(), Value::from(position));
+        body.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(s) = show_on_front_of_card { body.insert("showOnFrontOfCard".to_string(), Value::Bool(s)); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create custom field (base group) failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse custom field failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn create_custom_field_in_group(&self, custom_field_group_id: &str, position: i64, name: &str, show_on_front_of_card: Option<bool>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/custom-field-groups/{}/custom-fields", base, custom_field_group_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        body.insert("position".to_string(), Value::from(position));
+        body.insert("name".to_string(), Value::String(name.to_string()));
+        if let Some(s) = show_on_front_of_card { body.insert("showOnFrontOfCard".to_string(), Value::Bool(s)); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone()); log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create custom field failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse custom field failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn delete_custom_field(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/custom-fields/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url).header("Authorization", auth).header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete custom field failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_custom_field(&self, id: &str, position: Option<i64>, name: Option<&str>, show_on_front_of_card: Option<bool>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/custom-fields/{}", base, id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(p) = position { body.insert("position".to_string(), Value::from(p)); }
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(s) = show_on_front_of_card { body.insert("showOnFrontOfCard".to_string(), Value::Bool(s)); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth).header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json").json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update custom field failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
 }
 
 // POST /api/access-tokens
@@ -2463,6 +2725,21 @@ pub struct PlankaTask {
 }
 
 #[derive(Clone, Debug)]
+pub struct PlankaCustomField {
+    pub id: String,
+    pub name: String,
+    pub show_on_front_of_card: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaCustomFieldGroupDetails {
+    pub id: String,
+    pub name: Option<String>,
+    pub fields: Vec<PlankaCustomField>,
+    pub values_by_field: std::collections::HashMap<String, String>, // fieldId -> content
+}
+
+#[derive(Clone, Debug)]
 pub struct PlankaCardDetails {
     pub id: String,
     pub name: String,
@@ -2479,6 +2756,7 @@ pub struct PlankaCardDetails {
     pub attachments_full: Vec<PlankaAttachment>,
     pub tasks_full: Vec<PlankaTask>,
     pub task_lists: Vec<(String, String)>, // (id, name)
+    pub custom_field_groups: Vec<PlankaCustomFieldGroupDetails>,
 }
 
 #[derive(Clone, Debug)]
