@@ -2615,6 +2615,453 @@ impl PlankaClient {
         if !status.is_success() { return Err(format!("Update custom field failed: HTTP {} - {}", status, text)); }
         Ok(())
     }
+
+    pub fn accept_terms(&self, pending_token: &str, signature: &str) -> Result<String, String> {
+        let url = format!("{}/api/access-tokens/accept-terms", self.base_url.trim_end_matches('/'));
+        let body = json!({ "pendingToken": pending_token, "signature": signature });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Accept","application/json"),("Content-Type","application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Accept","application/json").header(CONTENT_TYPE,"application/json")
+            .json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status(); let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(), &text);
+        if !status.is_success(){ return Err(format!("Accept terms failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse accept-terms failed: {}", e))?;
+        v.get("item").and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing token".to_string())
+    }
+
+    pub fn logout_me(&self) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/access-tokens/me", base);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp = self.client.delete(&url)
+            .header("Authorization",auth).header("Accept","application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Logout failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse logout failed: {}", e))?;
+        v.get("item").and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing item".to_string())
+    }
+
+    pub fn exchange_with_oidc(&self, code: &str, nonce: &str, with_http_only_token: Option<bool>) -> Result<String, String> {
+        let url = format!("{}/api/access-tokens/exchange-with-oidc", self.base_url.trim_end_matches('/'));
+        let mut body = Map::new();
+        body.insert("code".into(), Value::String(code.into()));
+        body.insert("nonce".into(), Value::String(nonce.into()));
+        if let Some(v) = with_http_only_token { body.insert("withHttpOnlyToken".into(), Value::Bool(v)); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone());
+            log_http_request("POST",&url,&[("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp = self.client.post(&url)
+            .header("Accept","application/json").header(CONTENT_TYPE,"application/json")
+            .json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("OIDC exchange failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse exchange failed: {}", e))?;
+        v.get("item").and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing token".to_string())
+    }
+
+    pub fn revoke_pending_token(&self, pending_token: &str) -> Result<(), String> {
+        let url = format!("{}/api/access-tokens/revoke-pending-token", self.base_url.trim_end_matches('/'));
+        let body = json!({ "pendingToken": pending_token });
+        #[cfg(debug_assertions)]
+        log_http_request("POST",&url,&[("Accept","application/json"),("Content-Type","application/json")],Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Accept","application/json").header(CONTENT_TYPE,"application/json")
+            .json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Revoke pending token failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_server_config(&self) -> Result<PlankaServerConfig, String> {
+        let url = format!("{}/api/config", self.base_url.trim_end_matches('/'));
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Accept","application/json")],None);
+        let resp = self.client.get(&url)
+            .header("Accept","application/json").send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch config failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse config failed: {}", e))?;
+        let item = v.get("item").ok_or("Missing item")?;
+        let version = item.get("version").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let active = item.get("activeUsersLimit").and_then(|x| x.as_i64());
+        let oidc = item.get("oidc").and_then(|x| x.as_object()).map(|o| PlankaOidcConfig{
+            authorization_url: o.get("authorizationUrl").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+            end_session_url: o.get("endSessionUrl").and_then(|x| x.as_str()).map(|s| s.to_string()),
+            is_enforced: o.get("isEnforced").and_then(|x| x.as_bool()).unwrap_or(false),
+        });
+        Ok(PlankaServerConfig{ version, active_users_limit: active, oidc })
+    }
+
+    pub fn create_board_notification_service(&self, board_id: &str, url_value: &str, format_value: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/boards/{}/notification-services", base, board_id);
+        let auth = self.auth_header(); let body = json!({ "url": url_value, "format": format_value });
+        #[cfg(debug_assertions)] log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&body.to_string()));
+        let resp = self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Create board notification service failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse notification service failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn create_user_notification_service(&self, user_id: &str, url_value: &str, format_value: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/users/{}/notification-services", base, user_id);
+        let auth = self.auth_header(); let body = json!({ "url": url_value, "format": format_value });
+        #[cfg(debug_assertions)] log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&body.to_string()));
+        let resp = self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Create user notification service failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse notification service failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn delete_notification_service(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notification-services/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp = self.client.delete(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Delete notification service failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_notification_service(&self, id: &str, url_value: Option<&str>, format_value: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notification-services/{}", base, id);
+        let auth = self.auth_header(); let mut body = Map::new();
+        if let Some(u) = url_value { body.insert("url".into(), Value::String(u.into())); }
+        if let Some(f) = format_value { body.insert("format".into(), Value::String(f.into())); }
+        if body.is_empty(){ return Ok(()); }
+        #[cfg(debug_assertions)] { let preview = Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp = self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update notification service failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn test_notification_service(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notification-services/{}/test", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some("{}"));
+        let resp = self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&json!({})).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Test notification service failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_notifications(&self) -> Result<Vec<PlankaNotification>, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notifications", base);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp = self.client.get(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch notifications failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse notifications failed: {}", e))?;
+        let mut out=Vec::new();
+        if let Some(items)=v.get("items").and_then(|x| x.as_array()){
+            for n in items {
+                let id = n.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let user_id = n.get("userId").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let card_id = n.get("cardId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let r#type = n.get("type").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let is_read = n.get("isRead").and_then(|x| x.as_bool()).unwrap_or(false);
+                let created = n.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let text = n.get("data").and_then(|d| d.get("text")).and_then(|x| x.as_str()).map(|s| s.to_string());
+                out.push(PlankaNotification{ id, user_id, card_id, r#type, text, is_read, created });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn read_all_notifications(&self) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notifications/read-all", base);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some("{}"));
+        let resp = self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&json!({})).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Read-all notifications failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_notification(&self, id: &str) -> Result<PlankaNotification, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notifications/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp = self.client.get(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch notification failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse notification failed: {}", e))?;
+        let n = v.get("item").ok_or("Missing item")?;
+        let nid = n.get("id").and_then(|x| x.as_str()).unwrap_or(id).to_string();
+        let user_id = n.get("userId").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+        let card_id = n.get("cardId").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let r#type = n.get("type").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+        let is_read = n.get("isRead").and_then(|x| x.as_bool()).unwrap_or(false);
+        let created = n.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let textf = n.get("data").and_then(|d| d.get("text")).and_then(|x| x.as_str()).map(|s| s.to_string());
+        Ok(PlankaNotification{ id: nid, user_id, card_id, r#type, text: textf, is_read, created })
+    }
+
+    pub fn update_notification(&self, id: &str, is_read: bool) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/notifications/{}", base, id);
+        let auth = self.auth_header(); let body = json!({ "isRead": is_read });
+        #[cfg(debug_assertions)] log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&body.to_string()));
+        let resp = self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update notification failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_terms(&self, r#type: &str, language: Option<&str>) -> Result<PlankaTerms, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = if let Some(lang) = language {
+            format!("{}/api/terms/{}?language={}", base, r#type, lang)
+        } else {
+            format!("{}/api/terms/{}", base, r#type)
+        };
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Accept","application/json")],None);
+        let resp = self.client.get(&url).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch terms failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse terms failed: {}", e))?;
+        let item = v.get("item").ok_or("Missing item")?;
+        Ok(PlankaTerms{
+            r#type: item.get("type").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            language: item.get("language").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            content: item.get("content").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            signature: item.get("signature").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        })
+    }
+
+    pub fn create_user(&self, email: &str, password: &str, role: &str, name: &str, username: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/users", base);
+        let auth = self.auth_header(); let mut body = Map::new();
+        body.insert("email".into(), Value::String(email.into()));
+        body.insert("password".into(), Value::String(password.into()));
+        body.insert("role".into(), Value::String(role.into()));
+        body.insert("name".into(), Value::String(name.into()));
+        if let Some(u)=username { body.insert("username".into(), Value::String(u.into())); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone()); log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp = self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Create user failed: HTTP {} - {}", status, text)); }
+        let v: Value=serde_json::from_str(&text).map_err(|e| format!("parse create user failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn fetch_users(&self) -> Result<Vec<PlankaUser>, String> {
+        let base = self.base_url.trim_end_matches('/'); let url = format!("{}/api/users", base);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp = self.client.get(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch users failed: HTTP {} - {}", status, text)); }
+        let v: Value=serde_json::from_str(&text).map_err(|e| format!("parse users failed: {}", e))?;
+        let mut out=Vec::new();
+        if let Some(items)=v.get("items").and_then(|x| x.as_array()){
+            for u in items {
+                out.push(PlankaUser{
+                    id: u.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    role: u.get("role").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    name: u.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    username: u.get("username").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    email: u.get("email").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    is_deactivated: u.get("isDeactivated").and_then(|x| x.as_bool()).unwrap_or(false),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn delete_user(&self, id: &str) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}", base, id);
+        let auth=self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp=self.client.delete(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Delete user failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_user(&self, id: &str) -> Result<PlankaUser, String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}", base, id);
+        let auth=self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp=self.client.get(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch user failed: HTTP {} - {}", status, text)); }
+        let v: Value=serde_json::from_str(&text).map_err(|e| format!("parse user failed: {}", e))?;
+        let u=v.get("item").ok_or("Missing item")?;
+        Ok(PlankaUser{
+            id: u.get("id").and_then(|x| x.as_str()).unwrap_or(id).to_string(),
+            role: u.get("role").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+            name: u.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+            username: u.get("username").and_then(|x| x.as_str()).map(|s| s.to_string()),
+            email: u.get("email").and_then(|x| x.as_str()).map(|s| s.to_string()),
+            is_deactivated: u.get("isDeactivated").and_then(|x| x.as_bool()).unwrap_or(false),
+        })
+    }
+
+    pub fn update_user(&self, id: &str, role: Option<&str>, name: Option<&str>, is_deactivated: Option<bool>) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}", base, id);
+        let auth=self.auth_header(); let mut body=Map::new();
+        if let Some(r)=role { body.insert("role".into(), Value::String(r.into())); }
+        if let Some(n)=name { body.insert("name".into(), Value::String(n.into())); }
+        if let Some(d)=is_deactivated { body.insert("isDeactivated".into(), Value::Bool(d)); }
+        if body.is_empty(){ return Ok(()); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update user failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_user_avatar(&self, id: &str, file_path: &str) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}/avatar", base, id);
+        let auth=self.auth_header();
+        let form = Form::new().file("file", file_path).map_err(|e| format!("Read file failed: {}", e))?;
+        #[cfg(debug_assertions)] log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],Some("[multipart form]"));
+        let resp=self.client.post(&url).header("Authorization",auth).header("Accept","application/json").multipart(form).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update avatar failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_user_email(&self, id: &str, email: &str, current_password: Option<&str>) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}/email", base, id);
+        let auth=self.auth_header(); let mut body=Map::new();
+        body.insert("email".into(), Value::String(email.into()));
+        if let Some(p)=current_password { body.insert("currentPassword".into(), Value::String(p.into())); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update user email failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_user_password(&self, id: &str, password: &str, current_password: Option<&str>) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}/password", base, id);
+        let auth=self.auth_header(); let mut body=Map::new();
+        body.insert("password".into(), Value::String(password.into()));
+        if let Some(p)=current_password { body.insert("currentPassword".into(), Value::String(p.into())); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update user password failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_user_username(&self, id: &str, username: Option<&str>, current_password: Option<&str>) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/users/{}/username", base, id);
+        let auth=self.auth_header(); let mut body=Map::new();
+        if let Some(u)=username { body.insert("username".into(), Value::String(u.into())); }
+        if let Some(p)=current_password { body.insert("currentPassword".into(), Value::String(p.into())); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update user username failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_webhook(&self, name: &str, url_value: &str, access_token: Option<&str>, events: Option<&str>, excluded_events: Option<&str>) -> Result<String, String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks", base);
+        let auth=self.auth_header(); let mut body=Map::new();
+        body.insert("name".into(), Value::String(name.into()));
+        body.insert("url".into(), Value::String(url_value.into()));
+        if let Some(t)=access_token { body.insert("accessToken".into(), Value::String(t.into())); }
+        if let Some(e)=events { body.insert("events".into(), Value::String(e.into())); }
+        if let Some(x)=excluded_events { body.insert("excludedEvents".into(), Value::String(x.into())); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Create webhook failed: HTTP {} - {}", status, text)); }
+        let v: Value=serde_json::from_str(&text).map_err(|e| format!("parse create webhook failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn fetch_webhooks(&self) -> Result<Vec<PlankaWebhook>, String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks", base);
+        let auth=self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("GET",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp=self.client.get(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Fetch webhooks failed: HTTP {} - {}", status, text)); }
+        let v: Value=serde_json::from_str(&text).map_err(|e| format!("parse webhooks failed: {}", e))?;
+        let mut out=Vec::new();
+        if let Some(items)=v.get("items").and_then(|x| x.as_array()){
+            for w in items {
+                out.push(PlankaWebhook{
+                    id: w.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    name: w.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    url: w.get("url").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    access_token: w.get("accessToken").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    events: w.get("events").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    excluded_events: w.get("excludedEvents").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn delete_webhook(&self, id: &str) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks/{}", base, id);
+        let auth=self.auth_header();
+        #[cfg(debug_assertions)] log_http_request("DELETE",&url,&[("Authorization",auth.as_str()),("Accept","application/json")],None);
+        let resp=self.client.delete(&url).header("Authorization",auth).header("Accept","application/json").send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Delete webhook failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn update_webhook(&self, id: &str, name: Option<&str>, url_value: Option<&str>, access_token: Option<&str>, events: Option<&str>, excluded_events: Option<&str>) -> Result<(), String> {
+        let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks/{}", base, id);
+        let auth=self.auth_header(); let mut body=Map::new();
+        if let Some(v)=name { body.insert("name".into(), Value::String(v.into())); }
+        if let Some(v)=url_value { body.insert("url".into(), Value::String(v.into())); }
+        if let Some(v)=access_token { body.insert("accessToken".into(), Value::String(v.into())); }
+        if let Some(v)=events { body.insert("events".into(), Value::String(v.into())); }
+        if let Some(v)=excluded_events { body.insert("excludedEvents".into(), Value::String(v.into())); }
+        if body.is_empty(){ return Ok(()); }
+        #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
+            log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
+        let resp=self.client.patch(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status=resp.status(); let text=resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)] log_http_response(status.as_u16(),&text);
+        if !status.is_success(){ return Err(format!("Update webhook failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
 }
 
 // POST /api/access-tokens
@@ -2807,4 +3254,66 @@ pub struct PlankaListDetails {
     pub id: String,
     pub name: String,
     pub cards: Vec<PlankaCard>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaServerConfig {
+    pub version: String,
+    pub active_users_limit: Option<i64>,
+    pub oidc: Option<PlankaOidcConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaOidcConfig {
+    pub authorization_url: String,
+    pub end_session_url: Option<String>,
+    pub is_enforced: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaNotification {
+    pub id: String,
+    pub user_id: String,
+    pub card_id: Option<String>,
+    pub r#type: String,
+    pub text: Option<String>,
+    pub is_read: bool,
+    pub created: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaNotificationService {
+    pub id: String,
+    pub user_id: Option<String>,
+    pub board_id: Option<String>,
+    pub url: String,
+    pub format: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaUser {
+    pub id: String,
+    pub role: String,
+    pub name: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub is_deactivated: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaWebhook {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub access_token: Option<String>,
+    pub events: Option<String>,
+    pub excluded_events: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaTerms {
+    pub r#type: String,
+    pub language: String,
+    pub content: String,
+    pub signature: String,
 }
