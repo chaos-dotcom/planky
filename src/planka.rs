@@ -559,30 +559,41 @@ impl PlankaClient {
             .ok_or_else(|| "Create project response missing id".to_string())
     }
 
-    pub fn create_board(&self, project_id: &str, name: &str) -> Result<String, String> {
+    pub fn create_board_with_import(
+        &self,
+        project_id: &str,
+        position: i64,
+        name: &str,
+        import_type: Option<&str>,         // e.g. Some("trello")
+        import_file: Option<&str>,         // local path to import file
+        request_id: Option<&str>,
+    ) -> Result<String, String> {
         let base = self.base_url.trim_end_matches('/');
-        // Per API: POST /projects/{projectId}/boards
         let url = format!("{}/api/projects/{}/boards", base, project_id);
         let auth = self.auth_header();
-        let body = json!({ "name": name, "position": 65536 });
+        let mut form = Form::new()
+            .text("position", position.to_string())
+            .text("name", name.to_string());
+        if let Some(req) = request_id {
+            form = form.text("requestId", req.to_string());
+        }
+        if let Some(path) = import_file {
+            let it = import_type.unwrap_or("trello");
+            form = form.text("importType", it.to_string());
+            form = form
+                .file("importFile", path)
+                .map_err(|e| format!("Read import file failed: {}", e))?;
+        } else if let Some(it) = import_type {
+            // spec allows importType; harmless if sent without file
+            form = form.text("importType", it.to_string());
+        }
         #[cfg(debug_assertions)]
-        log_http_request(
-            "POST",
-            &url,
-            &[
-                ("Authorization", auth.as_str()),
-                ("Accept", "application/json"),
-                ("Content-Type", "application/json"),
-            ],
-            Some(&body.to_string()),
-        );
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], Some("[multipart form]"));
         let resp = self.client
             .post(&url)
             .header("Authorization", auth)
             .header("Accept", "application/json")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header(CONTENT_TYPE, "application/json")
-            .json(&body)
+            .multipart(form)
             .send()
             .map_err(|e| format!("POST {} failed: {}", url, e))?;
         let status = resp.status();
@@ -590,13 +601,18 @@ impl PlankaClient {
         #[cfg(debug_assertions)]
         log_http_response(status.as_u16(), &text);
         if !status.is_success() {
-            return Err(format!("Create board failed: HTTP {} - {}", status, text));
+            return Err(format!("Create board (multipart) failed: HTTP {} - {}", status, text));
         }
         let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse create_board failed: {}", e))?;
         v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
             .or_else(|| v.get("id").and_then(|x| x.as_str()))
             .map(|s| s.to_string())
             .ok_or_else(|| "Create board response missing id".to_string())
+    }
+
+    pub fn create_board(&self, project_id: &str, name: &str) -> Result<String, String> {
+        // Default simple case (no import): spec requires multipart; we call the multipart variant.
+        self.create_board_with_import(project_id, 65536, name, None, None, None)
     }
 
     pub fn create_card(&self, list_id: &str, name: &str, due: Option<&str>) -> Result<String, String> {
@@ -2991,14 +3007,25 @@ impl PlankaClient {
         Ok(())
     }
 
-    pub fn create_webhook(&self, name: &str, url_value: &str, access_token: Option<&str>, events: Option<&str>, excluded_events: Option<&str>) -> Result<String, String> {
+    pub fn create_webhook(
+        &self,
+        name: &str,
+        url_value: &str,
+        access_token: Option<&str>,
+        events: Option<&[&str]>,
+        excluded_events: Option<&[&str]>,
+    ) -> Result<String, String> {
         let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks", base);
         let auth=self.auth_header(); let mut body=Map::new();
         body.insert("name".into(), Value::String(name.into()));
         body.insert("url".into(), Value::String(url_value.into()));
         if let Some(t)=access_token { body.insert("accessToken".into(), Value::String(t.into())); }
-        if let Some(e)=events { body.insert("events".into(), Value::String(e.into())); }
-        if let Some(x)=excluded_events { body.insert("excludedEvents".into(), Value::String(x.into())); }
+        if let Some(e) = events {
+            body.insert("events".into(), Value::Array(e.iter().map(|s| Value::String((*s).to_string())).collect()));
+        }
+        if let Some(x) = excluded_events {
+            body.insert("excludedEvents".into(), Value::Array(x.iter().map(|s| Value::String((*s).to_string())).collect()));
+        }
         #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
             log_http_request("POST",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
         let resp=self.client.post(&url).header("Authorization",auth).header("Accept","application/json").header(CONTENT_TYPE,"application/json").json(&body).send().map_err(|e| format!("POST {} failed: {}", url, e))?;
@@ -3026,8 +3053,8 @@ impl PlankaClient {
                     name: w.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
                     url: w.get("url").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
                     access_token: w.get("accessToken").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    events: w.get("events").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                    excluded_events: w.get("excludedEvents").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    events: w.get("events").and_then(|x| x.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
+                    excluded_events: w.get("excludedEvents").and_then(|x| x.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
                 });
             }
         }
@@ -3045,14 +3072,26 @@ impl PlankaClient {
         Ok(())
     }
 
-    pub fn update_webhook(&self, id: &str, name: Option<&str>, url_value: Option<&str>, access_token: Option<&str>, events: Option<&str>, excluded_events: Option<&str>) -> Result<(), String> {
+    pub fn update_webhook(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        url_value: Option<&str>,
+        access_token: Option<&str>,
+        events: Option<&[&str]>,
+        excluded_events: Option<&[&str]>,
+    ) -> Result<(), String> {
         let base=self.base_url.trim_end_matches('/'); let url=format!("{}/api/webhooks/{}", base, id);
         let auth=self.auth_header(); let mut body=Map::new();
         if let Some(v)=name { body.insert("name".into(), Value::String(v.into())); }
         if let Some(v)=url_value { body.insert("url".into(), Value::String(v.into())); }
         if let Some(v)=access_token { body.insert("accessToken".into(), Value::String(v.into())); }
-        if let Some(v)=events { body.insert("events".into(), Value::String(v.into())); }
-        if let Some(v)=excluded_events { body.insert("excludedEvents".into(), Value::String(v.into())); }
+        if let Some(v) = events {
+            body.insert("events".into(), Value::Array(v.iter().map(|s| Value::String((*s).to_string())).collect()));
+        }
+        if let Some(v) = excluded_events {
+            body.insert("excludedEvents".into(), Value::Array(v.iter().map(|s| Value::String((*s).to_string())).collect()));
+        }
         if body.is_empty(){ return Ok(()); }
         #[cfg(debug_assertions)] { let preview=Value::Object(body.clone());
             log_http_request("PATCH",&url,&[("Authorization",auth.as_str()),("Accept","application/json"),("Content-Type","application/json")],Some(&preview.to_string())); }
@@ -3306,8 +3345,8 @@ pub struct PlankaWebhook {
     pub name: String,
     pub url: String,
     pub access_token: Option<String>,
-    pub events: Option<String>,
-    pub excluded_events: Option<String>,
+    pub events: Option<Vec<String>>,
+    pub excluded_events: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
