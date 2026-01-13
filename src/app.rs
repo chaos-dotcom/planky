@@ -68,6 +68,9 @@ pub enum InputMode {
     ViewingCard,
     CreatingComment,
     ControlCenter,
+    EditingComment,
+    CreatingAttachment,
+    CreatingChecklistItem,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -126,6 +129,10 @@ pub struct App {
     pub view_comments: Vec<PlankaComment>,
     #[serde(skip)]
     pub input_comment: String,
+    #[serde(skip)]
+    pub input_attachment_url: String,
+    #[serde(skip)]
+    pub input_checklist: String,
     #[serde(skip)]
     pub view_scroll: u16,
 }
@@ -254,6 +261,8 @@ impl App {
             view_card: None,
             view_comments: Vec::new(),
             input_comment: String::new(),
+            input_attachment_url: String::new(),
+            input_checklist: String::new(),
             view_scroll: 0,
         }
     }
@@ -1402,6 +1411,21 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
+    fn refresh_open_card_details(&mut self) {
+        let card_id = match self.view_card.as_ref() { Some(c) => c.id.clone(), None => return };
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Ok(details) = client.fetch_card_details(&card_id) {
+                    self.view_card = Some(details);
+                }
+                if let Ok(comments) = client.fetch_comments(&card_id) {
+                    self.view_comments = comments;
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
     pub fn begin_new_comment(&mut self) {
         self.input_comment.clear();
         self.input_mode = InputMode::CreatingComment;
@@ -1424,6 +1448,44 @@ impl App {
         self.error_message = None;
     }
 
+    pub fn begin_edit_last_comment(&mut self) {
+        if let Some(last) = self.view_comments.last() {
+            self.input_comment = last.text.clone();
+            self.input_mode = InputMode::EditingComment;
+            self.error_message = None;
+        }
+    }
+
+    pub fn submit_edit_comment(&mut self) -> Result<(), String> {
+        let Some(last) = self.view_comments.last() else { return Err("No comments to edit".into()); };
+        let cid = last.id.clone();
+        let text = self.input_comment.trim().to_string();
+        if text.is_empty() { return Err("Comment cannot be empty.".into()); }
+        let client = self.ensure_planka_client()?;
+        client.update_comment(&cid, &text)?;
+        self.input_comment.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Comment updated".into());
+        Ok(())
+    }
+
+    pub fn delete_last_comment(&mut self) {
+        let Some(last) = self.view_comments.last() else { return; };
+        let cid = last.id.clone();
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.delete_comment(&cid) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                    self.error_message = Some("Comment deleted".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
     pub fn submit_comment(&mut self) -> Result<(), String> {
         let text = self.input_comment.trim().to_string();
         if text.is_empty() {
@@ -1443,5 +1505,103 @@ impl App {
         self.input_mode = InputMode::ViewingCard;
         self.error_message = Some("Comment added".to_string());
         Ok(())
+    }
+
+    pub fn begin_add_attachment(&mut self) {
+        self.input_attachment_url.clear();
+        self.input_mode = InputMode::CreatingAttachment;
+        self.error_message = None;
+    }
+
+    pub fn submit_attachment(&mut self) -> Result<(), String> {
+        let url = self.input_attachment_url.trim().to_string();
+        if url.is_empty() { return Err("Attachment URL cannot be empty.".into()); }
+        let card_id = match self.view_card.as_ref() { Some(c) => c.id.clone(), None => return Err("No card open".into()) };
+        let client = self.ensure_planka_client()?;
+        let name = url.clone();
+        let _id = client.create_link_attachment(&card_id, &url, &name)?;
+        self.input_attachment_url.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Attachment added".into());
+        Ok(())
+    }
+
+    pub fn delete_last_attachment(&mut self) {
+        let Some(vc) = self.view_card.as_ref() else { return; };
+        let Some(last) = vc.attachments_full.last() else { return; };
+        let id = last.id.clone();
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.delete_attachment(&id) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                    self.error_message = Some("Attachment deleted".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn begin_add_checklist_item(&mut self) {
+        self.input_checklist.clear();
+        self.input_mode = InputMode::CreatingChecklistItem;
+        self.error_message = None;
+    }
+
+    pub fn submit_checklist_item(&mut self) -> Result<(), String> {
+        let name = self.input_checklist.trim().to_string();
+        if name.is_empty() { return Err("Checklist item cannot be empty.".into()); }
+        let (card_id, lists) = match self.view_card.as_ref() {
+            Some(c) => (c.id.clone(), c.task_lists.clone()),
+            None => return Err("No card open".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        let task_list_id = if let Some((id, _)) = lists.first() {
+            id.clone()
+        } else {
+            client.create_task_list(&card_id, "Checklist")?
+        };
+        let _tid = client.create_task(&task_list_id, &name)?;
+        self.input_checklist.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Checklist item added".into());
+        Ok(())
+    }
+
+    pub fn toggle_last_task(&mut self) {
+        let Some(vc) = self.view_card.as_ref() else { return; };
+        let Some(last) = vc.tasks_full.last() else { return; };
+        let id = last.id.clone();
+        let new_state = !last.is_completed;
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.update_task(&id, None, Some(new_state)) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn delete_last_task(&mut self) {
+        let Some(vc) = self.view_card.as_ref() else { return; };
+        let Some(last) = vc.tasks_full.last() else { return; };
+        let id = last.id.clone();
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.delete_task(&id) {
+                    self.error_message = Some(e);
+                } else {
+                    self.refresh_open_card_details();
+                    self.error_message = Some("Checklist item deleted".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
     }
 }

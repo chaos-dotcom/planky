@@ -305,6 +305,27 @@ where
                         KeyCode::Char('r') => {
                             app.begin_reply_to_last_comment();
                         }
+                        KeyCode::Char('e') => {
+                            app.begin_edit_last_comment();
+                        }
+                        KeyCode::Char('x') => {
+                            app.delete_last_comment();
+                        }
+                        KeyCode::Char('a') => {
+                            app.begin_add_attachment();
+                        }
+                        KeyCode::Char('z') => {
+                            app.delete_last_attachment();
+                        }
+                        KeyCode::Char('t') => {
+                            app.begin_add_checklist_item();
+                        }
+                        KeyCode::Char('o') => {
+                            app.toggle_last_task();
+                        }
+                        KeyCode::Char('k') => {
+                            app.delete_last_task();
+                        }
                         _ => {}
                     },
                     InputMode::CreatingComment => {
@@ -341,6 +362,65 @@ where
                             }
                             _ => {}
                         }
+                    },
+                    InputMode::EditingComment => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+                        {
+                            match paste_from_clipboard() {
+                                Ok(mut text) => {
+                                    while text.ends_with('\n') || text.ends_with('\r') { text.pop(); }
+                                    app.input_comment.push_str(&text);
+                                }
+                                Err(e) => app.error_message = Some(format!("Paste failed: {}", e)),
+                            }
+                            continue;
+                        }
+                        match key.code {
+                            KeyCode::Enter => {
+                                match app.submit_edit_comment() {
+                                    Ok(_) => {}
+                                    Err(e) => app.error_message = Some(e),
+                                }
+                            }
+                            KeyCode::Esc => {
+                                app.input_mode = InputMode::ViewingCard;
+                                app.input_comment.clear();
+                            }
+                            KeyCode::Char(c) => app.input_comment.push(c),
+                            KeyCode::Backspace => { app.input_comment.pop(); }
+                            _ => {}
+                        }
+                    },
+                    InputMode::CreatingAttachment => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_attachment() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::ViewingCard;
+                            app.input_attachment_url.clear();
+                        }
+                        KeyCode::Char(c) => app.input_attachment_url.push(c),
+                        KeyCode::Backspace => { app.input_attachment_url.pop(); }
+                        _ => {}
+                    },
+                    InputMode::CreatingChecklistItem => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_checklist_item() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::ViewingCard;
+                            app.input_checklist.clear();
+                        }
+                        KeyCode::Char(c) => app.input_checklist.push(c),
+                        KeyCode::Backspace => { app.input_checklist.pop(); }
+                        _ => {}
                     },
                     InputMode::ControlCenter => match key.code {
                         KeyCode::Esc | KeyCode::Tab => {
@@ -527,7 +607,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply",
+                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • z del attach • t add chk • o toggle chk • k del chk",
                 Style::default().fg(Color::Blue),
             )));
         } else {
@@ -593,6 +673,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::CreatingBoard
             | InputMode::CreatingProject
             | InputMode::CreatingComment
+            | InputMode::EditingComment
+            | InputMode::CreatingAttachment
+            | InputMode::CreatingChecklistItem
             | InputMode::Searching
     );
     if needs_input {
@@ -803,6 +886,30 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             let text = if app.input_comment.is_empty() { caret.to_string() } else { format!("{}{}", app.input_comment, caret) };
             let widget = Paragraph::new(text)
                 .block(Block::default().borders(Borders::ALL).title("Comment"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::EditingComment) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_comment.is_empty() { caret.to_string() } else { format!("{}{}", app.input_comment, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Edit Comment"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingAttachment) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_attachment_url.is_empty() { caret.to_string() } else { format!("{}{}", app.input_attachment_url, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Attachment URL"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingChecklistItem) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_checklist.is_empty() { caret.to_string() } else { format!("{}{}", app.input_checklist, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Checklist Item"))
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);
