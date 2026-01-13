@@ -652,108 +652,216 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     if matches!(app.input_mode, InputMode::ViewingCard) {
         let area = f.area();
+
+        // Top tabs, banner, main (columns + comments), footer help
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(1),  // tabs
+                Constraint::Length(6),  // banner
+                Constraint::Min(8),     // main
+                Constraint::Length(1),  // footer help
+            ])
             .split(area);
 
-        // Simple tabs header (Tasks active)
-        let tasks_style = Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD);
-        let tools_style = Style::default();
+        // Tabs like: General | Custom Fields | Comments
         let tabs_line = Line::from(vec![
-            Span::styled(" Tasks ", tasks_style),
-            Span::raw(" "),
-            Span::styled(" Tools ", tools_style),
+            Span::styled(" General ", Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)),
+            Span::raw(" | "),
+            Span::styled("Custom Fields", Style::default().fg(Color::Gray)),
+            Span::raw(" | "),
+            Span::styled("Comments", Style::default().fg(Color::Gray)),
         ]);
         let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
         f.render_widget(tabs, rows[0]);
 
-        let mut lines: Vec<Line> = Vec::new();
+        // Banner with big title/subtitle/path
         if let Some(d) = app.view_card.as_ref() {
-            lines.push(Line::from(Span::styled(&d.name, Style::default().add_modifier(Modifier::BOLD))));
+            let path = {
+                let board = app.current_project.clone();
+                let list = d.list_name.clone().unwrap_or_else(|| "List".to_string());
+                format!("{}  •  {}", board, list)
+            };
+            let banner_lines = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  {}", d.name),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "  Inspect your card like a boss.",
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  {}", path),
+                    Style::default().fg(Color::Gray),
+                )),
+            ];
+            let banner = Paragraph::new(banner_lines)
+                .block(Block::default().borders(Borders::ALL).title(" planka "))
+                .alignment(Alignment::Left);
+            f.render_widget(banner, rows[1]);
+
+            // Main area split: top columns (meta/attachments+checklist+fields) + bottom comments
+            let main_rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(rows[2]);
+
+            // Columns
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(main_rows[0]);
+
+            // Left: Meta + Custom Fields stacked
+            let left_rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(4), Constraint::Min(4)])
+                .split(cols[0]);
+
+            // Meta block (like "File" box)
+            let mut meta_lines: Vec<Line> = Vec::new();
+            meta_lines.push(Line::from(Span::styled(
+                format!("Id: {}", d.id),
+                Style::default().fg(Color::Cyan),
+            )));
             if let Some(ref ln) = d.list_name {
-                lines.push(Line::from(format!("List: {}", ln)));
+                meta_lines.push(Line::from(format!("List: {}", ln)));
             }
             if let Some(ref due) = d.due {
-                lines.push(Line::from(format!("Due: {}", due)));
+                meta_lines.push(Line::from(format!("Due: {}", due)));
             }
             if let Some(c) = d.is_due_completed {
-                lines.push(Line::from(format!("Due completed: {}", if c { "yes" } else { "no" })));
+                meta_lines.push(Line::from(format!("Due Completed: {}", if c { "yes" } else { "no" })));
             }
             if let Some(ref c) = d.created {
-                lines.push(Line::from(format!("Created: {}", c)));
+                meta_lines.push(Line::from(format!("Created: {}", c)));
             }
             if let Some(ref u) = d.updated {
-                lines.push(Line::from(format!("Updated: {}", u)));
+                meta_lines.push(Line::from(format!("Updated: {}", u)));
             }
             if !d.labels.is_empty() {
-                lines.push(Line::from(format!("Labels: {}", d.labels.join(", "))));
+                meta_lines.push(Line::from(format!("Labels: {}", d.labels.join(", "))));
             }
-            if !d.attachments.is_empty() {
-                lines.push(Line::from("Attachments:"));
-                for a in &d.attachments {
-                    lines.push(Line::from(format!("  • {}", a)));
-                }
-            }
-            if !d.tasks.is_empty() {
-                lines.push(Line::from("Checklist:"));
-                for (name, done) in &d.tasks {
-                    let mark = if *done { "[x]" } else { "[ ]" };
-                    lines.push(Line::from(format!("  {} {}", mark, name)));
-                }
-            }
-            // Custom fields
-            if !d.custom_field_groups.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled("Custom Fields:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+            let meta = Paragraph::new(meta_lines)
+                .block(Block::default().borders(Borders::ALL).title("| Meta |"))
+                .wrap(Wrap { trim: true });
+            f.render_widget(meta, left_rows[0]);
+
+            // Custom Fields block (like "Dependencies" box)
+            let mut field_lines: Vec<Line> = Vec::new();
+            if d.custom_field_groups.is_empty() {
+                field_lines.push(Line::from("No custom fields"));
+            } else {
                 for (i, g) in d.custom_field_groups.iter().enumerate() {
                     let sel = if i == app.selected_custom_group_index { ">>" } else { "  " };
                     let title = g.name.clone().unwrap_or_else(|| "Unnamed Group".to_string());
-                    lines.push(Line::from(Span::styled(format!("{} [{}] {}", sel, i + 1, title), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+                    field_lines.push(Line::from(Span::styled(
+                        format!("{} [{}] {}", sel, i + 1, title),
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    )));
                     for fld in &g.fields {
                         let val = g.values_by_field.get(&fld.id).cloned().unwrap_or_default();
-                        lines.push(Line::from(Span::styled(format!("    - {}: {}", fld.name, val), Style::default().fg(Color::Green))));
+                        field_lines.push(Line::from(format!("    - {}: {}", fld.name, val)));
                     }
                 }
             }
+            let fields = Paragraph::new(field_lines)
+                .block(Block::default().borders(Borders::ALL).title("| Custom Fields |"))
+                .wrap(Wrap { trim: true });
+            f.render_widget(fields, left_rows[1]);
+
+            // Right: Attachments + Checklist stacked
+            let right_rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(4), Constraint::Min(4)])
+                .split(cols[1]);
+
+            // Attachments block
+            let mut att_lines: Vec<Line> = Vec::new();
+            if d.attachments_full.is_empty() {
+                att_lines.push(Line::from("No attachments"));
+            } else {
+                for a in &d.attachments_full {
+                    let txt = if let Some(ref u) = a.url {
+                        format!("• {} ({})", a.name, u)
+                    } else {
+                        format!("• {}", a.name)
+                    };
+                    att_lines.push(Line::from(txt));
+                }
+            }
+            let atts = Paragraph::new(att_lines)
+                .block(Block::default().borders(Borders::ALL).title("| Attachments |"))
+                .wrap(Wrap { trim: true });
+            f.render_widget(atts, right_rows[0]);
+
+            // Checklist block
+            let mut chk_lines: Vec<Line> = Vec::new();
+            if d.tasks.is_empty() {
+                chk_lines.push(Line::from("No checklist items"));
+            } else {
+                for (name, done) in &d.tasks {
+                    let mark = if *done { "[x]" } else { "[ ]" };
+                    chk_lines.push(Line::from(format!("{} {}", mark, name)));
+                }
+            }
+            let chks = Paragraph::new(chk_lines)
+                .block(Block::default().borders(Borders::ALL).title("| Checklist |"))
+                .wrap(Wrap { trim: true });
+            f.render_widget(chks, right_rows[1]);
+
+            // Comments block (bottom)
+            let mut cm_lines: Vec<Line> = Vec::new();
             if !app.view_comments.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from("Comments:"));
-                let width = rows[1].width.saturating_sub(4) as usize;
+                let width = main_rows[1].width.saturating_sub(4) as usize;
                 for cm in &app.view_comments {
                     let head = match (&cm.user_name, &cm.created) {
-                        (Some(u), Some(ts)) => format!("  {} — {}", u, ts),
-                        (Some(u), None) => format!("  {}", u),
-                        (None, Some(ts)) => format!("  {}", ts),
-                        _ => "  ".to_string(),
+                        (Some(u), Some(ts)) => format!("{} — {}", u, ts),
+                        (Some(u), None) => u.to_string(),
+                        (None, Some(ts)) => ts.to_string(),
+                        _ => String::new(),
                     };
-                    lines.push(Line::from(head));
-                    for l in textwrap::wrap(&cm.text, width) {
-                        lines.push(Line::from(format!("    {}", l)));
+                    if !head.is_empty() {
+                        cm_lines.push(Line::from(Span::styled(
+                            head,
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        )));
                     }
+                    for l in textwrap::wrap(&cm.text, width) {
+                        cm_lines.push(Line::from(format!("  {}", l)));
+                    }
+                    cm_lines.push(Line::from(""));
                 }
+            } else {
+                cm_lines.push(Line::from("No comments"));
             }
-            if let Some(ref desc) = d.description {
-                lines.push(Line::from("")); // spacer
-                lines.push(Line::from("Description:"));
-                for l in textwrap::wrap(desc, rows[1].width.saturating_sub(4) as usize) {
-                    lines.push(Line::from(format!("  {}", l)));
-                }
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • F file attach • R ren attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox • Y duplicate • N read notifs • 1-9 sel CFG • g add Card CFG • G add Board CFG • f add Field • v set Value • X del Value • h ren CFG • D del CFG",
-                Style::default().fg(Color::Blue),
-            )));
-        } else {
-            lines.push(Line::from("No card loaded"));
-        }
+            let comments = Paragraph::new(cm_lines)
+                .block(Block::default().borders(Borders::ALL).title("| Comments |"))
+                .wrap(Wrap { trim: true })
+                .scroll((app.view_scroll, 0));
+            f.render_widget(comments, main_rows[1]);
 
-        let details = Paragraph::new(lines).style(Style::default().fg(Color::Green))
-            .block(Block::default().borders(Borders::ALL).title("Card"))
-            .wrap(Wrap { trim: true })
-            .scroll((app.view_scroll, 0));
-        f.render_widget(details, rows[1]);
+            // Footer help (bracketed keys)
+            let help = Paragraph::new(Line::from(vec![
+                Span::raw("[Esc] Close  "),
+                Span::raw("[↑/↓/PgUp/PgDn] Scroll  "),
+                Span::raw("[c] Comment  [r] Reply  [e] Edit  [x] Del cmnt  "),
+                Span::raw("[a] Attach  [F] File  [R] Ren  [z] Del  "),
+                Span::raw("[t] Add CB  [o] Toggle  [k] Del CB  "),
+                Span::raw("[Y] Dup  [N] Read  "),
+                Span::raw("[1-9] Sel CFG  [g] Card CFG  [G] Board CFG  "),
+                Span::raw("[f] Field  [v] Value  [X] Del Val  [h] Ren CFG  [D] Del CFG"),
+            ]))
+            .alignment(Alignment::Center);
+            f.render_widget(help, rows[3]);
+        } else {
+            let empty = Paragraph::new("No card loaded")
+                .block(Block::default().borders(Borders::ALL).title(" planka "));
+            f.render_widget(empty, rows[1]);
+        }
         return;
     }
 
