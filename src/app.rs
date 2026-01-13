@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
-use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard, PlankaCardDetails};
+use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard, PlankaCardDetails, PlankaComment};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlankaSetupStep {
@@ -66,6 +66,7 @@ pub enum InputMode {
     CreatingBoard,
     CreatingProject,
     ViewingCard,
+    CreatingComment,
     ControlCenter,
 }
 
@@ -121,6 +122,10 @@ pub struct App {
     pub editing_index: Option<usize>,
     #[serde(skip)]
     pub view_card: Option<PlankaCardDetails>,
+    #[serde(skip)]
+    pub view_comments: Vec<PlankaComment>,
+    #[serde(skip)]
+    pub input_comment: String,
     #[serde(skip)]
     pub view_scroll: u16,
 }
@@ -247,6 +252,8 @@ impl App {
             control_center_index: 0,
             editing_index: None,
             view_card: None,
+            view_comments: Vec::new(),
+            input_comment: String::new(),
             view_scroll: 0,
         }
     }
@@ -1375,6 +1382,10 @@ impl App {
             Ok(client) => match client.fetch_card_details(&cid) {
                 Ok(details) => {
                     self.view_card = Some(details);
+                    match client.fetch_comments(&cid) {
+                        Ok(comments) => self.view_comments = comments,
+                        Err(e) => { self.view_comments = Vec::new(); self.error_message = Some(e); }
+                    }
                     self.view_scroll = 0;
                     self.input_mode = InputMode::ViewingCard;
                     self.error_message = None;
@@ -1389,5 +1400,48 @@ impl App {
         self.view_card = None;
         self.view_scroll = 0;
         self.input_mode = InputMode::Normal;
+    }
+
+    pub fn begin_new_comment(&mut self) {
+        self.input_comment.clear();
+        self.input_mode = InputMode::CreatingComment;
+        self.error_message = None;
+    }
+
+    pub fn begin_reply_to_last_comment(&mut self) {
+        self.input_comment.clear();
+        if let Some(last) = self.view_comments.last() {
+            if let Some(name) = &last.user_name {
+                self.input_comment = format!("@{} ", name);
+            } else {
+                let preview = last.text.lines().take(1).next().unwrap_or("");
+                if !preview.is_empty() {
+                    self.input_comment = format!("> {}\n", preview);
+                }
+            }
+        }
+        self.input_mode = InputMode::CreatingComment;
+        self.error_message = None;
+    }
+
+    pub fn submit_comment(&mut self) -> Result<(), String> {
+        let text = self.input_comment.trim().to_string();
+        if text.is_empty() {
+            return Err("Comment cannot be empty.".to_string());
+        }
+        let card_id = match self.view_card.as_ref() {
+            Some(c) => c.id.clone(),
+            None => return Err("No card open".to_string()),
+        };
+        let client = self.ensure_planka_client()?;
+        let _cid = client.create_comment(&card_id, &text)?;
+        match client.fetch_comments(&card_id) {
+            Ok(comments) => self.view_comments = comments,
+            Err(e) => self.error_message = Some(e),
+        }
+        self.input_comment.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.error_message = Some("Comment added".to_string());
+        Ok(())
     }
 }

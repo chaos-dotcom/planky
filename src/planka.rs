@@ -1030,6 +1030,102 @@ impl PlankaClient {
             id, name, description, due, is_due_completed, created, updated, list_name, labels, attachments, tasks,
         })
     }
+    pub fn fetch_comments(&self, card_id: &str) -> Result<Vec<PlankaComment>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/comments", base, card_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "GET",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch comments failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("Parse comments failed: {}", e))?;
+        // Map userId -> user name
+        let mut user_name_by_id: HashMap<String, String> = HashMap::new();
+        if let Some(included) = v.get("included").and_then(|x| x.as_object()) {
+            if let Some(users) = included.get("users").and_then(|x| x.as_array()) {
+                for u in users {
+                    if let Some(uid) = u.get("id").and_then(|x| x.as_str()) {
+                        if let Some(name) = u.get("name").and_then(|x| x.as_str()).or_else(|| u.get("username").and_then(|x| x.as_str())) {
+                            user_name_by_id.insert(uid.to_string(), name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        // Collect items
+        let mut out: Vec<PlankaComment> = Vec::new();
+        if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+            for c in items {
+                let id = c.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let user_id = c.get("userId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let text = c.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let created = c.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let user_name = user_id.as_ref().and_then(|uid| user_name_by_id.get(uid)).cloned();
+                out.push(PlankaComment { id, user_id, user_name, text, created });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn create_comment(&self, card_id: &str, text: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/comments", base, card_id);
+        let auth = self.auth_header();
+        let body = json!({ "text": text });
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "POST",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+                ("Content-Type", "application/json"),
+            ],
+            Some(&body.to_string()),
+        );
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() {
+            return Err(format!("Create comment failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("Parse create comment failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Create comment response missing id".to_string())
+    }
 }
 
 // POST /api/access-tokens
@@ -1112,6 +1208,15 @@ pub struct PlankaCard {
     pub id: String,
     pub name: String,
     pub due: Option<String>,
+    pub created: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaComment {
+    pub id: String,
+    pub user_id: Option<String>,
+    pub user_name: Option<String>,
+    pub text: String,
     pub created: Option<String>,
 }
 

@@ -299,7 +299,48 @@ where
                         KeyCode::PageDown => {
                             app.view_scroll = app.view_scroll.saturating_add(10);
                         }
+                        KeyCode::Char('c') => {
+                            app.begin_new_comment();
+                        }
+                        KeyCode::Char('r') => {
+                            app.begin_reply_to_last_comment();
+                        }
                         _ => {}
+                    },
+                    InputMode::CreatingComment => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+                        {
+                            match paste_from_clipboard() {
+                                Ok(mut text) => {
+                                    while text.ends_with('\n') || text.ends_with('\r') {
+                                        text.pop();
+                                    }
+                                    app.input_comment.push_str(&text);
+                                }
+                                Err(e) => app.error_message = Some(format!("Paste failed: {}", e)),
+                            }
+                            continue;
+                        }
+                        match key.code {
+                            KeyCode::Enter => {
+                                match app.submit_comment() {
+                                    Ok(_) => {}
+                                    Err(e) => app.error_message = Some(e),
+                                }
+                            }
+                            KeyCode::Esc => {
+                                app.input_mode = InputMode::ViewingCard;
+                                app.input_comment.clear();
+                            }
+                            KeyCode::Char(c) => {
+                                app.input_comment.push(c);
+                            }
+                            KeyCode::Backspace => {
+                                app.input_comment.pop();
+                            }
+                            _ => {}
+                        }
                     },
                     InputMode::ControlCenter => match key.code {
                         KeyCode::Esc | KeyCode::Tab => {
@@ -460,6 +501,23 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     lines.push(Line::from(format!("  {} {}", mark, name)));
                 }
             }
+            if !app.view_comments.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from("Comments:"));
+                let width = rows[1].width.saturating_sub(4) as usize;
+                for cm in &app.view_comments {
+                    let head = match (&cm.user_name, &cm.created) {
+                        (Some(u), Some(ts)) => format!("  {} — {}", u, ts),
+                        (Some(u), None) => format!("  {}", u),
+                        (None, Some(ts)) => format!("  {}", ts),
+                        _ => "  ".to_string(),
+                    };
+                    lines.push(Line::from(head));
+                    for l in textwrap::wrap(&cm.text, width) {
+                        lines.push(Line::from(format!("    {}", l)));
+                    }
+                }
+            }
             if let Some(ref desc) = d.description {
                 lines.push(Line::from("")); // spacer
                 lines.push(Line::from("Description:"));
@@ -469,7 +527,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll",
+                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply",
                 Style::default().fg(Color::Blue),
             )));
         } else {
@@ -534,6 +592,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::EditingPlanka
             | InputMode::CreatingBoard
             | InputMode::CreatingProject
+            | InputMode::CreatingComment
             | InputMode::Searching
     );
     if needs_input {
@@ -736,6 +795,14 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             let text = if app.input_project.is_empty() { caret.to_string() } else { format!("{}{}", app.input_project, caret) };
             let widget = Paragraph::new(text)
                 .block(Block::default().borders(Borders::ALL).title("New Project Name"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::CreatingComment) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_comment.is_empty() { caret.to_string() } else { format!("{}{}", app.input_comment, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Comment"))
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);
