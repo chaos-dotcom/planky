@@ -689,7 +689,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
-                    "  Inspect your card like a boss.",
+                    "Card Details Viewer ",
                     Style::default().fg(Color::Yellow),
                 )),
                 Line::from(""),
