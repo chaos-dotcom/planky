@@ -2146,6 +2146,213 @@ impl PlankaClient {
         if !status.is_success() { return Err(format!("Sort list failed: HTTP {} - {}", status, text)); }
         Ok(())
     }
+
+    pub fn create_file_attachment(&self, card_id: &str, file_path: &str, name: Option<&str>) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/attachments", base, card_id);
+        let auth = self.auth_header();
+        let mut form = Form::new()
+            .text("type", "file".to_string());
+        form = form.file("file", file_path)
+            .map_err(|e| format!("Read file failed: {}", e))?;
+        if let Some(n) = name {
+            form = form.text("name", n.to_string());
+        }
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], Some("[multipart form]"));
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .multipart(form)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create file attachment failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("Parse create attachment failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Create attachment response missing id".to_string())
+    }
+
+    pub fn update_attachment_name(&self, attachment_id: &str, name: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/attachments/{}", base, attachment_id);
+        let auth = self.auth_header();
+        let body = json!({ "name": name });
+        #[cfg(debug_assertions)]
+        log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client
+            .patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update attachment failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn upload_background_image(&self, project_id: &str, file_path: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}/background-images", base, project_id);
+        let auth = self.auth_header();
+        let form = Form::new()
+            .file("file", file_path)
+            .map_err(|e| format!("Read file failed: {}", e))?;
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], Some("[multipart form]"));
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .multipart(form)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Upload background image failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("Parse background image failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Upload background image response missing id".to_string())
+    }
+
+    pub fn delete_background_image(&self, background_image_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/background-images/{}", base, background_image_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client
+            .delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete background image failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_base_custom_field_group(&self, project_id: &str, name: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}/base-custom-field-groups", base, project_id);
+        let auth = self.auth_header();
+        let body = json!({ "name": name });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create base custom field group failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse base custom field group failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn update_base_custom_field_group(&self, id: &str, name: Option<&str>) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/base-custom-field-groups/{}", base, id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update base custom field group failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_base_custom_field_group(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/base-custom-field-groups/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send().map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete base custom field group failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn duplicate_card(&self, card_id: &str, position: i64, name: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/duplicate", base, card_id);
+        let auth = self.auth_header();
+        let body = json!({ "position": position, "name": name });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Duplicate card failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse duplicate card failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string())
+            .ok_or_else(|| "Duplicate card response missing id".to_string())
+    }
+
+    pub fn read_card_notifications(&self, card_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/read-notifications", base, card_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some("{}"));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&json!({}))
+            .send().map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Read card notifications failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
 }
 
 // POST /api/access-tokens
