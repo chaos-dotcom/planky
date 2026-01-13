@@ -914,6 +914,122 @@ impl PlankaClient {
         }
         Ok(out)
     }
+
+    pub fn fetch_card_details(&self, card_id: &str) -> Result<PlankaCardDetails, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}", base, card_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request(
+            "GET",
+            &url,
+            &[
+                ("Authorization", auth.as_str()),
+                ("Accept", "application/json"),
+                ("X-Requested-With", "XMLHttpRequest"),
+            ],
+            None,
+        );
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch card details failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text)
+            .map_err(|e| format!("Parse card details failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object())
+            .ok_or_else(|| "Missing item".to_string())?;
+
+        let id = item.get("id").and_then(|x| x.as_str()).unwrap_or(card_id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let description = item.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let due = item.get("dueDate").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let is_due_completed = item.get("isDueCompleted").and_then(|x| x.as_bool());
+        let created = item.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let updated = item.get("updatedAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let list_id = item.get("listId").and_then(|x| x.as_str()).map(|s| s.to_string());
+
+        let included = v.get("included").and_then(|x| x.as_object());
+
+        let mut list_name: Option<String> = None;
+        let mut labels: Vec<String> = Vec::new();
+        let mut attachments: Vec<String> = Vec::new();
+        let mut tasks: Vec<(String, bool)> = Vec::new();
+
+        if let Some(inc) = included {
+            // lists -> find current list name
+            if let (Some(lists), Some(lid)) = (inc.get("lists").and_then(|x| x.as_array()), list_id.as_ref()) {
+                for l in lists {
+                    let lid_json = l.get("id").and_then(|x| x.as_str());
+                    if lid_json == Some(lid.as_str()) {
+                        if let Some(n) = l.get("name").and_then(|x| x.as_str()).or_else(|| l.get("title").and_then(|x| x.as_str())) {
+                            list_name = Some(n.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            // labels: from labels + cardLabels
+            let mut label_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            if let Some(arr) = inc.get("labels").and_then(|x| x.as_array()) {
+                for lab in arr {
+                    if let (Some(id), Some(name)) = (
+                        lab.get("id").and_then(|x| x.as_str()),
+                        lab.get("name").and_then(|x| x.as_str()),
+                    ) {
+                        label_by_id.insert(id.to_string(), name.to_string());
+                    }
+                }
+            }
+            if let Some(arr) = inc.get("cardLabels").and_then(|x| x.as_array()) {
+                for cl in arr {
+                    let cl_card = cl.get("cardId").and_then(|x| x.as_str());
+                    if cl_card == Some(id.as_str()) {
+                        if let Some(lid) = cl.get("labelId").and_then(|x| x.as_str()) {
+                            if let Some(name) = label_by_id.get(lid) {
+                                labels.push(name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            // attachments: take names; if link, append URL in parens when present
+            if let Some(arr) = inc.get("attachments").and_then(|x| x.as_array()) {
+                for a in arr {
+                    if let Some(n) = a.get("name").and_then(|x| x.as_str()) {
+                        let mut s = n.to_string();
+                        if let Some(data) = a.get("data").and_then(|x| x.as_object()) {
+                            if let Some(u) = data.get("url").and_then(|x| x.as_str()) {
+                                s.push_str(&format!(" ({})", u));
+                            }
+                        }
+                        attachments.push(s);
+                    }
+                }
+            }
+            // tasks: included.tasks
+            if let Some(arr) = inc.get("tasks").and_then(|x| x.as_array()) {
+                for t in arr {
+                    let n = t.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                    let c = t.get("isCompleted").and_then(|x| x.as_bool()).unwrap_or(false);
+                    tasks.push((n, c));
+                }
+            }
+        }
+
+        Ok(PlankaCardDetails {
+            id, name, description, due, is_due_completed, created, updated, list_name, labels, attachments, tasks,
+        })
+    }
 }
 
 // POST /api/access-tokens
@@ -997,4 +1113,19 @@ pub struct PlankaCard {
     pub name: String,
     pub due: Option<String>,
     pub created: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaCardDetails {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub due: Option<String>,
+    pub is_due_completed: Option<bool>,
+    pub created: Option<String>,
+    pub updated: Option<String>,
+    pub list_name: Option<String>,
+    pub labels: Vec<String>,
+    pub attachments: Vec<String>,
+    pub tasks: Vec<(String, bool)>, // (name, isCompleted)
 }

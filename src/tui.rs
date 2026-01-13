@@ -89,6 +89,9 @@ where
                                 app.selected -= 1;
                             }
                         }
+                        KeyCode::Enter => {
+                            app.open_selected_card();
+                        }
                         KeyCode::Char('c') => {
                             let list = filtered_todos(app);
                             if let Some(todo) = list.get(app.selected) {
@@ -280,6 +283,24 @@ where
                         }
                         _ => {}
                     },
+                    InputMode::ViewingCard => match key.code {
+                        KeyCode::Esc => {
+                            app.close_view();
+                        }
+                        KeyCode::Up => {
+                            app.view_scroll = app.view_scroll.saturating_sub(1);
+                        }
+                        KeyCode::Down => {
+                            app.view_scroll = app.view_scroll.saturating_add(1);
+                        }
+                        KeyCode::PageUp => {
+                            app.view_scroll = app.view_scroll.saturating_sub(10);
+                        }
+                        KeyCode::PageDown => {
+                            app.view_scroll = app.view_scroll.saturating_add(10);
+                        }
+                        _ => {}
+                    },
                     InputMode::ControlCenter => match key.code {
                         KeyCode::Esc | KeyCode::Tab => {
                             app.input_mode = InputMode::Normal;
@@ -387,6 +408,82 @@ fn filtered_todos(app: &App) -> Vec<&crate::todo::Todo> {
 fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let size = f.area();
 
+    if matches!(app.input_mode, InputMode::ViewingCard) {
+        let area = f.area();
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+
+        // Simple tabs header (Tasks active)
+        let tasks_style = Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD);
+        let tools_style = Style::default();
+        let tabs_line = Line::from(vec![
+            Span::styled(" Tasks ", tasks_style),
+            Span::raw(" "),
+            Span::styled(" Tools ", tools_style),
+        ]);
+        let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
+        f.render_widget(tabs, rows[0]);
+
+        let mut lines: Vec<Line> = Vec::new();
+        if let Some(d) = app.view_card.as_ref() {
+            lines.push(Line::from(Span::styled(&d.name, Style::default().add_modifier(Modifier::BOLD))));
+            if let Some(ref ln) = d.list_name {
+                lines.push(Line::from(format!("List: {}", ln)));
+            }
+            if let Some(ref due) = d.due {
+                lines.push(Line::from(format!("Due: {}", due)));
+            }
+            if let Some(c) = d.is_due_completed {
+                lines.push(Line::from(format!("Due completed: {}", if c { "yes" } else { "no" })));
+            }
+            if let Some(ref c) = d.created {
+                lines.push(Line::from(format!("Created: {}", c)));
+            }
+            if let Some(ref u) = d.updated {
+                lines.push(Line::from(format!("Updated: {}", u)));
+            }
+            if !d.labels.is_empty() {
+                lines.push(Line::from(format!("Labels: {}", d.labels.join(", "))));
+            }
+            if !d.attachments.is_empty() {
+                lines.push(Line::from("Attachments:"));
+                for a in &d.attachments {
+                    lines.push(Line::from(format!("  • {}", a)));
+                }
+            }
+            if !d.tasks.is_empty() {
+                lines.push(Line::from("Checklist:"));
+                for (name, done) in &d.tasks {
+                    let mark = if *done { "[x]" } else { "[ ]" };
+                    lines.push(Line::from(format!("  {} {}", mark, name)));
+                }
+            }
+            if let Some(ref desc) = d.description {
+                lines.push(Line::from("")); // spacer
+                lines.push(Line::from("Description:"));
+                for l in textwrap::wrap(desc, rows[1].width.saturating_sub(4) as usize) {
+                    lines.push(Line::from(format!("  {}", l)));
+                }
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Esc close • Up/Down/PageUp/PageDown scroll",
+                Style::default().fg(Color::Blue),
+            )));
+        } else {
+            lines.push(Line::from("No card loaded"));
+        }
+
+        let details = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Card"))
+            .wrap(Wrap { trim: true })
+            .scroll((app.view_scroll, 0));
+        f.render_widget(details, rows[1]);
+        return;
+    }
+
     if matches!(app.input_mode, InputMode::ControlCenter) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -487,6 +584,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             Span::raw("Press "),
             Span::styled("a", b), Span::raw(" add, "),
             Span::styled("e", b), Span::raw(" edit, "),
+            Span::styled("Enter", b), Span::raw(" open, "),
             Span::styled("d", b), Span::raw(" done, "),
             Span::styled("w", b), Span::raw(" doing, "),
             Span::raw("Shift+"), Span::styled("R", b), Span::raw(" delete, "),

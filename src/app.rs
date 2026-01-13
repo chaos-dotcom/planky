@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
-use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard};
+use crate::planka::{self, PlankaBoard, PlankaClient, PlankaConfig, PlankaLists, PlankaCard, PlankaCardDetails};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PlankaSetupStep {
@@ -65,6 +65,7 @@ pub enum InputMode {
     EditingPlanka,  // Planka setup flow
     CreatingBoard,
     CreatingProject,
+    ViewingCard,
     ControlCenter,
 }
 
@@ -118,6 +119,10 @@ pub struct App {
     pub control_center_index: usize,
     #[serde(skip)]
     pub editing_index: Option<usize>,
+    #[serde(skip)]
+    pub view_card: Option<PlankaCardDetails>,
+    #[serde(skip)]
+    pub view_scroll: u16,
 }
 
 impl Default for InputMode {
@@ -241,6 +246,8 @@ impl App {
             inbound_rx: None,
             control_center_index: 0,
             editing_index: None,
+            view_card: None,
+            view_scroll: 0,
         }
     }
 
@@ -1353,5 +1360,34 @@ impl App {
         } else {
             App::new()
         }
+    }
+
+    pub fn open_selected_card(&mut self) {
+        let Some(idx) = self.selected_index_in_all() else { return; };
+        let cid = match self.todos[idx].planka_card_id.as_deref() {
+            Some(c) => c.to_string(),
+            None => {
+                self.error_message = Some("This task is not linked to a Planka card yet".to_string());
+                return;
+            }
+        };
+        match self.ensure_planka_client() {
+            Ok(client) => match client.fetch_card_details(&cid) {
+                Ok(details) => {
+                    self.view_card = Some(details);
+                    self.view_scroll = 0;
+                    self.input_mode = InputMode::ViewingCard;
+                    self.error_message = None;
+                }
+                Err(e) => self.error_message = Some(e),
+            },
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn close_view(&mut self) {
+        self.view_card = None;
+        self.view_scroll = 0;
+        self.input_mode = InputMode::Normal;
     }
 }
