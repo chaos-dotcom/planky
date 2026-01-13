@@ -1324,6 +1324,432 @@ impl PlankaClient {
         if !status.is_success() { return Err(format!("Delete task failed: HTTP {} - {}", status, text)); }
         Ok(())
     }
+
+    pub fn fetch_board_actions(&self, board_id: &str, before_id: Option<&str>) -> Result<Vec<PlankaAction>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = match before_id {
+            Some(b) => format!("{}/api/boards/{}/actions?beforeId={}", base, board_id, b),
+            None => format!("{}/api/boards/{}/actions", base, board_id),
+        };
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch board actions failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse actions failed: {}", e))?;
+        let mut out = Vec::new();
+        if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+            for a in items {
+                let id = a.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let type_ = a.get("type").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let user_id = a.get("userId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let card_id = a.get("cardId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let created = a.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let data = a.get("data").cloned();
+                out.push(PlankaAction { id, type_, user_id, card_id, data, created });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn fetch_card_actions(&self, card_id: &str, before_id: Option<&str>) -> Result<Vec<PlankaAction>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = match before_id {
+            Some(b) => format!("{}/api/cards/{}/actions?beforeId={}", base, card_id, b),
+            None => format!("{}/api/cards/{}/actions", base, card_id),
+        };
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch card actions failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse actions failed: {}", e))?;
+        let mut out = Vec::new();
+        if let Some(items) = v.get("items").and_then(|x| x.as_array()) {
+            for a in items {
+                let id = a.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let type_ = a.get("type").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let user_id = a.get("userId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let card_id = a.get("cardId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let created = a.get("createdAt").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let data = a.get("data").cloned();
+                out.push(PlankaAction { id, type_, user_id, card_id, data, created });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn add_label_to_card(&self, card_id: &str, label_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/card-labels", base, card_id);
+        let auth = self.auth_header();
+        let body = json!({ "labelId": label_id });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Add label failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn remove_label_from_card(&self, card_id: &str, label_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/card-labels/labelId:{}", base, card_id, label_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Remove label failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn add_member_to_card(&self, card_id: &str, user_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        the url = format!("{}/api/cards/{}/card-memberships", base, card_id);
+        let auth = self.auth_header();
+        let body = json!({ "userId": user_id });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Add member failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn remove_member_from_card(&self, card_id: &str, user_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/cards/{}/card-memberships/userId:{}", base, card_id, user_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Remove member failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn create_project_manager(&self, project_id: &str, user_id: &str) -> Result<String, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}/project-managers", base, project_id);
+        let auth = self.auth_header();
+        let body = json!({ "userId": user_id });
+        #[cfg(debug_assertions)]
+        log_http_request("POST", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&body.to_string()));
+        let resp = self.client.post(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("POST {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Create project manager failed: HTTP {} - {}", status, text)); }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse project manager failed: {}", e))?;
+        v.get("item").and_then(|i| i.get("id")).and_then(|x| x.as_str()).map(|s| s.to_string()).ok_or_else(|| "Response missing id".to_string())
+    }
+
+    pub fn delete_project_manager(&self, id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/project-managers/{}", base, id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete project manager failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_projects(&self) -> Result<Vec<PlankaProject>, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects", base);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch projects failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse projects failed: {}", e))?;
+        let iter = v.as_array()
+            .cloned()
+            .or_else(|| v.get("items").and_then(|x| x.as_array()).cloned())
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for p in iter {
+            if let Some(id) = p.get("id").and_then(|x| x.as_str()) {
+                let name = p.get("name").and_then(|x| x.as_str()).or_else(|| p.get("title").and_then(|x| x.as_str())).unwrap_or("").to_string();
+                let description = p.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let is_hidden = p.get("isHidden").and_then(|x| x.as_bool());
+                out.push(PlankaProject { id: id.to_string(), name, description, is_hidden });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn fetch_project_details(&self, project_id: &str) -> Result<PlankaProjectDetails, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}?include=boards", base, project_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch project failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse project failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object()).ok_or_else(|| "Missing item".to_string())?;
+        let id = item.get("id").and_then(|x| x.as_str()).unwrap_or(project_id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).or_else(|| item.get("title").and_then(|x| x.as_str())).unwrap_or("").to_string();
+        let description = item.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let is_hidden = item.get("isHidden").and_then(|x| x.as_bool());
+        let mut boards: Vec<PlankaBoard> = Vec::new();
+        if let Some(arr) = v.get("included").and_then(|i| i.get("boards")).and_then(|x| x.as_array()) {
+            for b in arr {
+                if let (Some(bid), Some(bname)) = (
+                    b.get("id").and_then(|x| x.as_str()),
+                    b.get("name").and_then(|x| x.as_str()).or_else(|| b.get("title").and_then(|x| x.as_str())),
+                ) {
+                    boards.push(PlankaBoard {
+                        id: bid.to_string(),
+                        name: bname.to_string(),
+                        project_id: Some(id.clone()),
+                        project_name: Some(name.clone()),
+                    });
+                }
+            }
+        }
+        Ok(PlankaProjectDetails { id, name, description, is_hidden, boards })
+    }
+
+    pub fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        is_hidden: Option<bool>,
+        is_favorite: Option<bool>,
+        background_type: Option<&str>,
+        background_gradient: Option<&str>,
+    ) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}", base, project_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(d) = description { body.insert("description".to_string(), Value::String(d.to_string())); }
+        if let Some(h) = is_hidden { body.insert("isHidden".to_string(), Value::Bool(h)); }
+        if let Some(f) = is_favorite { body.insert("isFavorite".to_string(), Value::Bool(f)); }
+        if let Some(bt) = background_type { body.insert("backgroundType".to_string(), Value::String(bt.to_string())); }
+        if let Some(bg) = background_gradient { body.insert("backgroundGradient".to_string(), Value::String(bg.to_string())); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update project failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_project(&self, project_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/projects/{}", base, project_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete project failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn fetch_task_list(&self, task_list_id: &str) -> Result<PlankaTaskListDetails, String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/task-lists/{}", base, task_list_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("GET", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("X-Requested-With", "XMLHttpRequest")], None);
+        let resp = self.client.get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .send()
+            .map_err(|e| format!("GET {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() || text.trim_start().starts_with('<') {
+            return Err(format!("Fetch task list failed: HTTP {} - {}", status, text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("parse task list failed: {}", e))?;
+        let item = v.get("item").and_then(|x| x.as_object()).ok_or_else(|| "Missing item".to_string())?;
+        let id = item.get("id").and_then(|x| x.as_str()).unwrap_or(task_list_id).to_string();
+        let name = item.get("name").and_then(|x| x.as_str()).or_else(|| item.get("title").and_then(|x| x.as_str())).unwrap_or("").to_string();
+        let mut tasks: Vec<PlankaTask> = Vec::new();
+        if let Some(arr) = v.get("included").and_then(|i| i.get("tasks")).and_then(|x| x.as_array()) {
+            for t in arr {
+                let tid = t.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let n = t.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let c = t.get("isCompleted").and_then(|x| x.as_bool()).unwrap_or(false);
+                let tlid = t.get("taskListId").and_then(|x| x.as_str()).map(|s| s.to_string());
+                tasks.push(PlankaTask { id: tid, name: n, is_completed: c, task_list_id: tlid });
+            }
+        }
+        Ok(PlankaTaskListDetails { id, name, tasks })
+    }
+
+    pub fn update_task_list(
+        &self,
+        task_list_id: &str,
+        name: Option<&str>,
+        position: Option<i64>,
+        show_on_front_of_card: Option<bool>,
+        hide_completed_tasks: Option<bool>,
+    ) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/task-lists/{}", base, task_list_id);
+        let auth = self.auth_header();
+        let mut body = Map::new();
+        if let Some(n) = name { body.insert("name".to_string(), Value::String(n.to_string())); }
+        if let Some(p) = position { body.insert("position".to_string(), Value::from(p)); }
+        if let Some(s) = show_on_front_of_card { body.insert("showOnFrontOfCard".to_string(), Value::Bool(s)); }
+        if let Some(h) = hide_completed_tasks { body.insert("hideCompletedTasks".to_string(), Value::Bool(h)); }
+        if body.is_empty() { return Ok(()); }
+        #[cfg(debug_assertions)]
+        { let preview = Value::Object(body.clone()); log_http_request("PATCH", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json"), ("Content-Type", "application/json")], Some(&preview.to_string())); }
+        let resp = self.client.patch(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("PATCH {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Update task list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
+
+    pub fn delete_task_list(&self, task_list_id: &str) -> Result<(), String> {
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/api/task-lists/{}", base, task_list_id);
+        let auth = self.auth_header();
+        #[cfg(debug_assertions)]
+        log_http_request("DELETE", &url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None);
+        let resp = self.client.delete(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| format!("DELETE {} failed: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        #[cfg(debug_assertions)]
+        log_http_response(status.as_u16(), &text);
+        if !status.is_success() { return Err(format!("Delete task list failed: HTTP {} - {}", status, text)); }
+        Ok(())
+    }
 }
 
 // POST /api/access-tokens
@@ -1450,4 +1876,38 @@ pub struct PlankaCardDetails {
     pub attachments_full: Vec<PlankaAttachment>,
     pub tasks_full: Vec<PlankaTask>,
     pub task_lists: Vec<(String, String)>, // (id, name)
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaAction {
+    pub id: String,
+    pub type_: String,
+    pub user_id: Option<String>,
+    pub card_id: Option<String>,
+    pub data: Option<Value>,
+    pub created: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaProject {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_hidden: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaProjectDetails {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_hidden: Option<bool>,
+    pub boards: Vec<PlankaBoard>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlankaTaskListDetails {
+    pub id: String,
+    pub name: String,
+    pub tasks: Vec<PlankaTask>,
 }
