@@ -150,6 +150,8 @@ pub struct App {
     #[serde(skip)]
     pub view_scroll: u16,
     #[serde(skip)]
+    pub view_card_tab: usize,
+    #[serde(skip)]
     pub selected_custom_group_index: usize,
     #[serde(skip)]
     pub input_cfg_group_name: String,
@@ -299,6 +301,7 @@ impl App {
             input_attachment_name: String::new(),
             input_duplicate_name: String::new(),
             view_scroll: 0,
+            view_card_tab: 0,
             selected_custom_group_index: 0,
             input_cfg_group_name: String::new(),
             input_custom_field_name: String::new(),
@@ -1436,6 +1439,7 @@ impl App {
                     }
                     self.view_scroll = 0;
                     self.input_mode = InputMode::ViewingCard;
+                    self.view_card_tab = 0;
                     self.error_message = None;
                 }
                 Err(e) => self.error_message = Some(e),

@@ -287,6 +287,12 @@ where
                         KeyCode::Esc => {
                             app.close_view();
                         }
+                        KeyCode::Tab => {
+                            app.view_card_tab = (app.view_card_tab + 1) % 4;
+                        }
+                        KeyCode::BackTab => {
+                            app.view_card_tab = (app.view_card_tab + 3) % 4;
+                        }
                         KeyCode::Up => {
                             app.view_scroll = app.view_scroll.saturating_sub(1);
                         }
@@ -653,25 +659,32 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
     if matches!(app.input_mode, InputMode::ViewingCard) {
         let area = f.area();
 
-        // Top tabs, banner, main (columns + comments), footer help
+        // Top tabs, banner, tab content
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),  // tabs
                 Constraint::Length(6),  // banner
-                Constraint::Min(8),     // main
-                Constraint::Length(2),  // footer help (wrapped into 2 lines)
+                Constraint::Min(8),     // tab content
             ])
             .split(area);
 
-        // Tabs like: General | Custom Fields | Comments
-        let tabs_line = Line::from(vec![
-            Span::styled(" General ", Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)),
-            Span::raw(" | "),
-            Span::styled("Custom Fields", Style::default().fg(Color::Gray)),
-            Span::raw(" | "),
-            Span::styled("Comments", Style::default().fg(Color::Gray)),
-        ]);
+        // Tabs: General | Custom Fields | Comments | Commands
+        let mut tab_spans: Vec<Span> = Vec::new();
+        let labels = ["General", "Custom Fields", "Comments", "Commands"];
+        for (i, label) in labels.iter().enumerate() {
+            if i > 0 {
+                tab_spans.push(Span::raw(" | "));
+            }
+            let style = if app.view_card_tab == i {
+                Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            tab_spans.push(Span::styled(*label, style));
+        }
+        tab_spans.push(Span::raw("   [Tab/Shift+Tab to switch]"));
+        let tabs_line = Line::from(tab_spans);
         let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
         f.render_widget(tabs, rows[0]);
 
@@ -699,165 +712,181 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 .alignment(Alignment::Left);
             f.render_widget(banner, rows[1]);
 
-            // Main area split: top columns (meta/attachments+checklist+fields) + bottom comments
-            let main_rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .split(rows[2]);
-
-            // Columns
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(main_rows[0]);
-
-            // Left: Meta + Custom Fields stacked
-            let left_rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Min(4)])
-                .split(cols[0]);
-
-            // Meta block (like "File" box)
-            let mut meta_lines: Vec<Line> = Vec::new();
-            meta_lines.push(Line::from(Span::styled(
-                format!("Id: {}", d.id),
-                Style::default().fg(Color::Cyan),
-            )));
-            if let Some(ref ln) = d.list_name {
-                meta_lines.push(Line::from(format!("List: {}", ln)));
-            }
-            if let Some(ref due) = d.due {
-                meta_lines.push(Line::from(format!("Due: {}", due)));
-            }
-            if let Some(c) = d.is_due_completed {
-                meta_lines.push(Line::from(format!("Due Completed: {}", if c { "yes" } else { "no" })));
-            }
-            if let Some(ref c) = d.created {
-                meta_lines.push(Line::from(format!("Created: {}", c)));
-            }
-            if let Some(ref u) = d.updated {
-                meta_lines.push(Line::from(format!("Updated: {}", u)));
-            }
-            if !d.labels.is_empty() {
-                meta_lines.push(Line::from(format!("Labels: {}", d.labels.join(", "))));
-            }
-            let meta = Paragraph::new(meta_lines)
-                .block(Block::default().borders(Borders::ALL).title("| Meta |"))
-                .wrap(Wrap { trim: true });
-            f.render_widget(meta, left_rows[0]);
-
-            // Custom Fields block (like "Dependencies" box)
-            let mut field_lines: Vec<Line> = Vec::new();
-            if d.custom_field_groups.is_empty() {
-                field_lines.push(Line::from("No custom fields"));
-            } else {
-                for (i, g) in d.custom_field_groups.iter().enumerate() {
-                    let sel = if i == app.selected_custom_group_index { ">>" } else { "  " };
-                    let title = g.name.clone().unwrap_or_else(|| "Unnamed Group".to_string());
-                    field_lines.push(Line::from(Span::styled(
-                        format!("{} [{}] {}", sel, i + 1, title),
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            match app.view_card_tab {
+                // General: Meta + Custom Fields + Attachments + Checklist (no comments here)
+                0 => {
+                    // Main area split: top columns (meta/fields) + right (attachments/checklist)
+                    let main_rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(100)])
+                        .split(rows[2]);
+                    let cols = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(main_rows[0]);
+                    // Left: Meta + Custom Fields
+                    let left_rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Min(4), Constraint::Min(4)])
+                        .split(cols[0]);
+                    // Meta block (reuse existing meta_lines build)
+                    let mut meta_lines: Vec<Line> = Vec::new();
+                    meta_lines.push(Line::from(Span::styled(
+                        format!("Id: {}", d.id),
+                        Style::default().fg(Color::Cyan),
                     )));
-                    for fld in &g.fields {
-                        let val = g.values_by_field.get(&fld.id).cloned().unwrap_or_default();
-                        field_lines.push(Line::from(format!("    - {}: {}", fld.name, val)));
-                    }
-                }
-            }
-            let fields = Paragraph::new(field_lines)
-                .block(Block::default().borders(Borders::ALL).title("| Custom Fields |"))
-                .wrap(Wrap { trim: true });
-            f.render_widget(fields, left_rows[1]);
-
-            // Right: Attachments + Checklist stacked
-            let right_rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Min(4)])
-                .split(cols[1]);
-
-            // Attachments block
-            let mut att_lines: Vec<Line> = Vec::new();
-            if d.attachments_full.is_empty() {
-                att_lines.push(Line::from("No attachments"));
-            } else {
-                for a in &d.attachments_full {
-                    let txt = if let Some(ref u) = a.url {
-                        format!("• {} ({})", a.name, u)
+                    if let Some(ref ln) = d.list_name { meta_lines.push(Line::from(format!("List: {}", ln))); }
+                    if let Some(ref due) = d.due { meta_lines.push(Line::from(format!("Due: {}", due))); }
+                    if let Some(c) = d.is_due_completed { meta_lines.push(Line::from(format!("Due Completed: {}", if c { "yes" } else { "no" }))); }
+                    if let Some(ref c) = d.created { meta_lines.push(Line::from(format!("Created: {}", c))); }
+                    if let Some(ref u) = d.updated { meta_lines.push(Line::from(format!("Updated: {}", u))); }
+                    if !d.labels.is_empty() { meta_lines.push(Line::from(format!("Labels: {}", d.labels.join(", ")))); }
+                    let meta = Paragraph::new(meta_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Meta |"))
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(meta, left_rows[0]);
+                    // Custom Fields block (reuse existing field_lines build)
+                    let mut field_lines: Vec<Line> = Vec::new();
+                    if d.custom_field_groups.is_empty() {
+                        field_lines.push(Line::from("No custom fields"));
                     } else {
-                        format!("• {}", a.name)
-                    };
-                    att_lines.push(Line::from(txt));
-                }
-            }
-            let atts = Paragraph::new(att_lines)
-                .block(Block::default().borders(Borders::ALL).title("| Attachments |"))
-                .wrap(Wrap { trim: true });
-            f.render_widget(atts, right_rows[0]);
-
-            // Checklist block
-            let mut chk_lines: Vec<Line> = Vec::new();
-            if d.tasks.is_empty() {
-                chk_lines.push(Line::from("No checklist items"));
-            } else {
-                for (name, done) in &d.tasks {
-                    let mark = if *done { "[x]" } else { "[ ]" };
-                    chk_lines.push(Line::from(format!("{} {}", mark, name)));
-                }
-            }
-            let chks = Paragraph::new(chk_lines)
-                .block(Block::default().borders(Borders::ALL).title("| Checklist |"))
-                .wrap(Wrap { trim: true });
-            f.render_widget(chks, right_rows[1]);
-
-            // Comments block (bottom)
-            let mut cm_lines: Vec<Line> = Vec::new();
-            if !app.view_comments.is_empty() {
-                let width = main_rows[1].width.saturating_sub(4) as usize;
-                for cm in &app.view_comments {
-                    let head = match (&cm.user_name, &cm.created) {
-                        (Some(u), Some(ts)) => format!("{} — {}", u, ts),
-                        (Some(u), None) => u.to_string(),
-                        (None, Some(ts)) => ts.to_string(),
-                        _ => String::new(),
-                    };
-                    if !head.is_empty() {
-                        cm_lines.push(Line::from(Span::styled(
-                            head,
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                        )));
+                        for (i, g) in d.custom_field_groups.iter().enumerate() {
+                            let sel = if i == app.selected_custom_group_index { ">>" } else { "  " };
+                            let title = g.name.clone().unwrap_or_else(|| "Unnamed Group".to_string());
+                            field_lines.push(Line::from(Span::styled(
+                                format!("{} [{}] {}", sel, i + 1, title),
+                                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                            )));
+                            for fld in &g.fields {
+                                let val = g.values_by_field.get(&fld.id).cloned().unwrap_or_default();
+                                field_lines.push(Line::from(format!("    - {}: {}", fld.name, val)));
+                            }
+                        }
                     }
-                    for l in textwrap::wrap(&cm.text, width) {
-                        cm_lines.push(Line::from(format!("  {}", l)));
+                    let fields = Paragraph::new(field_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Custom Fields |"))
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(fields, left_rows[1]);
+                    // Right: Attachments + Checklist
+                    let right_rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Min(4), Constraint::Min(4)])
+                        .split(cols[1]);
+                    // Attachments
+                    let mut att_lines: Vec<Line> = Vec::new();
+                    if d.attachments_full.is_empty() {
+                        att_lines.push(Line::from("No attachments"));
+                    } else {
+                        for a in &d.attachments_full {
+                            let txt = if let Some(ref u) = a.url {
+                                format!("• {} ({})", a.name, u)
+                            } else {
+                                format!("• {}", a.name)
+                            };
+                            att_lines.push(Line::from(txt));
+                        }
                     }
-                    cm_lines.push(Line::from(""));
+                    let atts = Paragraph::new(att_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Attachments |"))
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(atts, right_rows[0]);
+                    // Checklist
+                    let mut chk_lines: Vec<Line> = Vec::new();
+                    if d.tasks.is_empty() {
+                        chk_lines.push(Line::from("No checklist items"));
+                    } else {
+                        for (name, done) in &d.tasks {
+                            let mark = if *done { "[x]" } else { "[ ]" };
+                            chk_lines.push(Line::from(format!("{} {}", mark, name)));
+                        }
+                    }
+                    let chks = Paragraph::new(chk_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Checklist |"))
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(chks, right_rows[1]);
                 }
-            } else {
-                cm_lines.push(Line::from("No comments"));
+                // Custom Fields only
+                1 => {
+                    let mut field_lines: Vec<Line> = Vec::new();
+                    if d.custom_field_groups.is_empty() {
+                        field_lines.push(Line::from("No custom fields"));
+                    } else {
+                        for (i, g) in d.custom_field_groups.iter().enumerate() {
+                            let sel = if i == app.selected_custom_group_index { ">>" } else { "  " };
+                            let title = g.name.clone().unwrap_or_else(|| "Unnamed Group".to_string());
+                            field_lines.push(Line::from(Span::styled(
+                                format!("{} [{}] {}", sel, i + 1, title),
+                                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                            )));
+                            for fld in &g.fields {
+                                let val = g.values_by_field.get(&fld.id).cloned().unwrap_or_default();
+                                field_lines.push(Line::from(format!("    - {}: {}", fld.name, val)));
+                            }
+                        }
+                    }
+                    let fields = Paragraph::new(field_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Custom Fields |"))
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(fields, rows[2]);
+                }
+                // Comments: immediately under banner (occupies entire content area)
+                2 => {
+                    let mut cm_lines: Vec<Line> = Vec::new();
+                    if !app.view_comments.is_empty() {
+                        let width = rows[2].width.saturating_sub(4) as usize;
+                        for cm in &app.view_comments {
+                            let head = match (&cm.user_name, &cm.created) {
+                                (Some(u), Some(ts)) => format!("{} — {}", u, ts),
+                                (Some(u), None) => u.to_string(),
+                                (None, Some(ts)) => ts.to_string(),
+                                _ => String::new(),
+                            };
+                            if !head.is_empty() {
+                                cm_lines.push(Line::from(Span::styled(
+                                    head,
+                                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                                )));
+                            }
+                            for l in textwrap::wrap(&cm.text, width) {
+                                cm_lines.push(Line::from(format!("  {}", l)));
+                            }
+                            cm_lines.push(Line::from(""));
+                        }
+                    } else {
+                        cm_lines.push(Line::from("No comments"));
+                    }
+                    let comments = Paragraph::new(cm_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Comments |"))
+                        .wrap(Wrap { trim: true })
+                        .scroll((app.view_scroll, 0));
+                    f.render_widget(comments, rows[2]);
+                }
+                // Commands tab: show all key bindings here
+                3 => {
+                    let help_lines = vec![
+                        Line::from(vec![
+                            Span::raw("[Esc] Close  "),
+                            Span::raw("[↑/↓/PgUp/PgDn] Scroll  "),
+                            Span::raw("[c] Comment  [r] Reply  [e] Edit  [x] Del cmnt  "),
+                            Span::raw("[t] Add CB  [o] Toggle  [k] Del CB  "),
+                        ]),
+                        Line::from(vec![
+                            Span::raw("[a] Link Attach  [F] File Attach  [R] Ren Attach  [z] Del Attach  "),
+                            Span::raw("[Y] Duplicate  [N] Read Notifs  "),
+                            Span::raw("[1-9] Sel CFG  [g] Card CFG  [G] Board CFG  "),
+                            Span::raw("[f] Field  [v] Value  [X] Del Val  [h] Ren CFG  [D] Del CFG"),
+                        ]),
+                        Line::from(""),
+                        Line::from(Span::styled("Tip: Use Tab / Shift+Tab to switch tabs.", Style::default().fg(Color::Yellow))),
+                    ];
+                    let help = Paragraph::new(help_lines)
+                        .block(Block::default().borders(Borders::ALL).title("| Commands |"))
+                        .alignment(Alignment::Center);
+                    f.render_widget(help, rows[2]);
+                }
+                _ => {}
             }
-            let comments = Paragraph::new(cm_lines)
-                .block(Block::default().borders(Borders::ALL).title("| Comments |"))
-                .wrap(Wrap { trim: true })
-                .scroll((app.view_scroll, 0));
-            f.render_widget(comments, main_rows[1]);
 
-            // Footer help (bracketed keys)
-            let help_lines = vec![
-                Line::from(vec![
-                    Span::raw("[Esc] Close  "),
-                    Span::raw("[↑/↓/PgUp/PgDn] Scroll  "),
-                    Span::raw("[c] Comment  [r] Reply  [e] Edit  [x] Del cmnt  "),
-                    Span::raw("[t] Add CB  [o] Toggle  [k] Del CB  "),
-                ]),
-                Line::from(vec![
-                    // file/attachment commands moved to this second (bottom) row
-                    Span::raw("[a] Link Attach  [F] File Attach  [R] Ren Attach  [z] Del Attach  "),
-                    Span::raw("[Y] Duplicate  [N] Read Notifs  "),
-                    Span::raw("[1-9] Sel CFG  [g] Card CFG  [G] Board CFG  "),
-                    Span::raw("[f] Field  [v] Value  [X] Del Val  [h] Ren CFG  [D] Del CFG"),
-                ]),
-            ];
-            let help = Paragraph::new(help_lines).alignment(Alignment::Center);
-            f.render_widget(help, rows[3]);
         } else {
             let empty = Paragraph::new("No card loaded")
                 .block(Block::default().borders(Borders::ALL).title(" planka "));
