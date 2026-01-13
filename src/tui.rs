@@ -314,6 +314,18 @@ where
                         KeyCode::Char('a') => {
                             app.begin_add_attachment();
                         }
+                        KeyCode::Char('F') => {
+                            app.begin_upload_file_attachment();
+                        }
+                        KeyCode::Char('R') => {
+                            app.begin_rename_last_attachment();
+                        }
+                        KeyCode::Char('Y') => {
+                            app.begin_duplicate_card();
+                        }
+                        KeyCode::Char('N') => {
+                            app.mark_card_notifications_read();
+                        }
                         KeyCode::Char('z') => {
                             app.delete_last_attachment();
                         }
@@ -405,6 +417,51 @@ where
                         }
                         KeyCode::Char(c) => app.input_attachment_url.push(c),
                         KeyCode::Backspace => { app.input_attachment_url.pop(); }
+                        _ => {}
+                    },
+                    InputMode::UploadingFileAttachment => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_file_attachment() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::ViewingCard;
+                            app.input_file_path.clear();
+                        }
+                        KeyCode::Char(c) => app.input_file_path.push(c),
+                        KeyCode::Backspace => { app.input_file_path.pop(); }
+                        _ => {}
+                    },
+                    InputMode::RenamingAttachment => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_rename_attachment() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::ViewingCard;
+                            app.input_attachment_name.clear();
+                        }
+                        KeyCode::Char(c) => app.input_attachment_name.push(c),
+                        KeyCode::Backspace => { app.input_attachment_name.pop(); }
+                        _ => {}
+                    },
+                    InputMode::DuplicatingCard => match key.code {
+                        KeyCode::Enter => {
+                            match app.submit_duplicate_card() {
+                                Ok(_) => {}
+                                Err(e) => app.error_message = Some(e),
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::ViewingCard;
+                            app.input_duplicate_name.clear();
+                        }
+                        KeyCode::Char(c) => app.input_duplicate_name.push(c),
+                        KeyCode::Backspace => { app.input_duplicate_name.pop(); }
                         _ => {}
                     },
                     InputMode::CreatingChecklistItem => match key.code {
@@ -607,7 +664,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox",
+                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • F file attach • R ren attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox • Y duplicate • N read notifs",
                 Style::default().fg(Color::Blue),
             )));
         } else {
@@ -675,6 +732,9 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             | InputMode::CreatingComment
             | InputMode::EditingComment
             | InputMode::CreatingAttachment
+            | InputMode::UploadingFileAttachment
+            | InputMode::RenamingAttachment
+            | InputMode::DuplicatingCard
             | InputMode::CreatingChecklistItem
             | InputMode::Searching
     );
@@ -769,7 +829,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 "[ ]"
             };
 
-            let mut desc_color = if t.done {
+            let desc_color = if t.done {
                 Color::Green
             } else if is_doing {
                 Color::Cyan
@@ -902,6 +962,30 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             let text = if app.input_attachment_url.is_empty() { caret.to_string() } else { format!("{}{}", app.input_attachment_url, caret) };
             let widget = Paragraph::new(text)
                 .block(Block::default().borders(Borders::ALL).title("Attachment URL"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::UploadingFileAttachment) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_file_path.is_empty() { caret.to_string() } else { format!("{}{}", app.input_file_path, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Attachment File Path"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::RenamingAttachment) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_attachment_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_attachment_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Attachment Name"))
+                .style(style)
+                .wrap(Wrap { trim: true });
+            f.render_widget(widget, chunks[last]);
+        } else if matches!(app.input_mode, InputMode::DuplicatingCard) {
+            let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            let text = if app.input_duplicate_name.is_empty() { caret.to_string() } else { format!("{}{}", app.input_duplicate_name, caret) };
+            let widget = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title("Duplicate Card Name"))
                 .style(style)
                 .wrap(Wrap { trim: true });
             f.render_widget(widget, chunks[last]);

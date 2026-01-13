@@ -71,6 +71,9 @@ pub enum InputMode {
     EditingComment,
     CreatingAttachment,
     CreatingChecklistItem,
+    UploadingFileAttachment,
+    RenamingAttachment,
+    DuplicatingCard,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -133,6 +136,12 @@ pub struct App {
     pub input_attachment_url: String,
     #[serde(skip)]
     pub input_checklist: String,
+    #[serde(skip)]
+    pub input_file_path: String,
+    #[serde(skip)]
+    pub input_attachment_name: String,
+    #[serde(skip)]
+    pub input_duplicate_name: String,
     #[serde(skip)]
     pub view_scroll: u16,
 }
@@ -263,6 +272,9 @@ impl App {
             input_comment: String::new(),
             input_attachment_url: String::new(),
             input_checklist: String::new(),
+            input_file_path: String::new(),
+            input_attachment_name: String::new(),
+            input_duplicate_name: String::new(),
             view_scroll: 0,
         }
     }
@@ -1538,6 +1550,103 @@ impl App {
                 } else {
                     self.refresh_open_card_details();
                     self.error_message = Some("Attachment deleted".into());
+                }
+            }
+            Err(e) => self.error_message = Some(e),
+        }
+    }
+
+    pub fn begin_upload_file_attachment(&mut self) {
+        self.input_file_path.clear();
+        self.input_mode = InputMode::UploadingFileAttachment;
+        self.error_message = None;
+    }
+
+    pub fn submit_file_attachment(&mut self) -> Result<(), String> {
+        let path = self.input_file_path.trim().to_string();
+        if path.is_empty() { return Err("File path cannot be empty.".into()); }
+        let card_id = match self.view_card.as_ref() {
+            Some(c) => c.id.clone(),
+            None => return Err("No card open".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        let _id = client.create_file_attachment(&card_id, &path, None)?;
+        self.input_file_path.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("File attachment added".into());
+        Ok(())
+    }
+
+    pub fn begin_rename_last_attachment(&mut self) {
+        if let Some(vc) = self.view_card.as_ref() {
+            if let Some(last) = vc.attachments_full.last() {
+                self.input_attachment_name = last.name.clone();
+                self.input_mode = InputMode::RenamingAttachment;
+                self.error_message = None;
+                return;
+            }
+        }
+        self.error_message = Some("No attachments to rename".into());
+    }
+
+    pub fn submit_rename_attachment(&mut self) -> Result<(), String> {
+        let name = self.input_attachment_name.trim().to_string();
+        if name.is_empty() { return Err("Attachment name cannot be empty.".into()); }
+        let (att_id, card_id) = match self.view_card.as_ref() {
+            Some(vc) => {
+                let last = vc.attachments_full.last().ok_or("No attachments on this card")?;
+                (last.id.clone(), vc.id.clone())
+            }
+            None => return Err("No card open".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        client.update_attachment_name(&att_id, &name)?;
+        self.input_attachment_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        self.refresh_open_card_details();
+        self.error_message = Some("Attachment renamed".into());
+        Ok(())
+    }
+
+    pub fn begin_duplicate_card(&mut self) {
+        if let Some(vc) = self.view_card.as_ref() {
+            self.input_duplicate_name = format!("{} (copy)", vc.name);
+            self.input_mode = InputMode::DuplicatingCard;
+            self.error_message = None;
+        } else {
+            self.error_message = Some("No card open".into());
+        }
+    }
+
+    pub fn submit_duplicate_card(&mut self) -> Result<(), String> {
+        let name = self.input_duplicate_name.trim().to_string();
+        if name.is_empty() { return Err("Duplicate name cannot be empty.".into()); }
+        let card_id = match self.view_card.as_ref() {
+            Some(c) => c.id.clone(),
+            None => return Err("No card open".into()),
+        };
+        let client = self.ensure_planka_client()?;
+        let _new_id = client.duplicate_card(&card_id, 65536, &name)?;
+        self.input_duplicate_name.clear();
+        self.input_mode = InputMode::ViewingCard;
+        // Optional: refresh current list or card view; we just refresh the open card
+        self.refresh_open_card_details();
+        self.error_message = Some("Card duplicated".into());
+        Ok(())
+    }
+
+    pub fn mark_card_notifications_read(&mut self) {
+        let card_id = match self.view_card.as_ref() {
+            Some(c) => c.id.clone(),
+            None => { self.error_message = Some("No card open".into()); return; }
+        };
+        match self.ensure_planka_client() {
+            Ok(client) => {
+                if let Err(e) = client.read_card_notifications(&card_id) {
+                    self.error_message = Some(e);
+                } else {
+                    self.error_message = Some("Card notifications marked as read".into());
                 }
             }
             Err(e) => self.error_message = Some(e),
