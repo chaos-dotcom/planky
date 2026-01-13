@@ -607,7 +607,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • z del attach • t add chk • o toggle chk • k del chk",
+                "Esc close • Up/Down/PageUp/PageDown scroll • c comment • r reply • e edit • x del cmnt • a add attach • z del attach • t add CheckBox • o toggle CheckBox • k del CheckBox",
                 Style::default().fg(Color::Blue),
             )));
         } else {
