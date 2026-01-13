@@ -365,7 +365,11 @@ where
                         KeyCode::Char('D') => { // delete selected group
                             app.delete_selected_custom_field_group();
                         }
-                        KeyCode::Char(c) if c >= '1' && c <= '9' => {
+                        KeyCode::Char('1') if app.view_card_tab != 2 => { app.view_card_tab = 0; }
+                        KeyCode::Char('2') if app.view_card_tab != 2 => { app.view_card_tab = 1; }
+                        KeyCode::Char('3') if app.view_card_tab != 2 => { app.view_card_tab = 2; }
+                        KeyCode::Char('4') if app.view_card_tab != 2 => { app.view_card_tab = 3; }
+                        KeyCode::Char(c) if app.view_card_tab == 2 && c >= '1' && c <= '9' => {
                             let idx = (c as u8 - b'1') as usize;
                             if let Some(vc) = app.view_card.as_ref() {
                                 if idx < vc.custom_field_groups.len() {
@@ -671,7 +675,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
         // Tabs: General | Custom Fields | Comments | Commands
         let mut tab_spans: Vec<Span> = Vec::new();
-        let labels = ["General", "Custom Fields", "Comments", "Commands"];
+        let labels = ["Comments", "General", "Custom Fields", "Commands"];
         for (i, label) in labels.iter().enumerate() {
             if i > 0 {
                 tab_spans.push(Span::raw(" | "));
@@ -683,7 +687,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
             };
             tab_spans.push(Span::styled(*label, style));
         }
-        tab_spans.push(Span::raw("   [Tab/Shift+Tab to switch]"));
+        tab_spans.push(Span::raw("   [1-4 or Tab/Shift+Tab to switch]"));
         let tabs_line = Line::from(tab_spans);
         let tabs = Paragraph::new(tabs_line).alignment(Alignment::Left);
         f.render_widget(tabs, rows[0]);
@@ -714,7 +718,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
             match app.view_card_tab {
                 // General: Meta + Custom Fields + Attachments + Checklist (no comments here)
-                0 => {
+                1 => {
                     // Main area split: top columns (meta/fields) + right (attachments/checklist)
                     let main_rows = Layout::default()
                         .direction(Direction::Vertical)
@@ -806,7 +810,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     f.render_widget(chks, right_rows[1]);
                 }
                 // Custom Fields only
-                1 => {
+                2 => {
                     let mut field_lines: Vec<Line> = Vec::new();
                     if d.custom_field_groups.is_empty() {
                         field_lines.push(Line::from("No custom fields"));
@@ -830,7 +834,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     f.render_widget(fields, rows[2]);
                 }
                 // Comments: immediately under banner (occupies entire content area)
-                2 => {
+                0 => {
                     let mut cm_lines: Vec<Line> = Vec::new();
                     if !app.view_comments.is_empty() {
                         let width = rows[2].width.saturating_sub(4) as usize;
@@ -881,7 +885,8 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     ];
                     let help = Paragraph::new(help_lines)
                         .block(Block::default().borders(Borders::ALL).title("| Commands |"))
-                        .alignment(Alignment::Center);
+                        .alignment(Alignment::Left)
+                        .wrap(Wrap { trim: true });
                     f.render_widget(help, rows[2]);
                 }
                 _ => {}
